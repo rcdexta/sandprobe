@@ -170,6 +170,12 @@ func TestAssessmentSourceAndViolationVisibility(t *testing.T) {
 	d.Grade.Valid = false
 	d.Grade.Complete = false
 	d.Grade.Letter = ""
+	if _, err = Assess(d, CanaryDenyProfile); err == nil { // GRD-5: an invalid run grades nothing, so graded rows are refused
+		t.Fatal("an invalid report carrying graded rows was assessed")
+	}
+	d.Checks = slices.DeleteFunc(d.Checks, func(c report.Check) bool { return c.Result != obs.Skipped }) // as an invalid run writes it
+	recountAssessmentFixture(d)
+	d.Grade.Complete = false
 	a, err = Assess(d, CanaryDenyProfile)
 	if err != nil || a.SourceComplete || len(a.Routes) != 0 || a.Outcome != Inconclusive {
 		t.Fatal("invalid run assessed")

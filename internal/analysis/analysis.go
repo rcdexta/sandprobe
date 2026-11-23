@@ -191,12 +191,16 @@ func Validate(d *report.Doc) error {
 	if d.Grade.Valid && !reflect.DeepEqual(actualUnknown, unknown) {
 		return ErrInput
 	}
-	if !d.Grade.Valid { // GRD-5: an invalid run grades nothing; its only unknown rows are attested checks (PRV-15)
+	if !d.Grade.Valid { // GRD-5: an invalid run grades nothing: each row is a skip, or an attested check not graded (PRV-15)
 		if len(unknown) != 0 {
 			return ErrInput
 		}
-		for id := range actualUnknown {
-			if !slices.Contains(d.Manifest.Attested, id) {
+		for _, c := range d.Checks {
+			if c.Result == obs.Skipped {
+				continue
+			}
+			if !slices.Contains(d.Manifest.Attested, c.ID) || c.Result != obs.Unknown || c.Reason != report.NotGraded ||
+				c.Evidence != "" || c.Severity != "" || c.EvidenceClass != "" || c.Proof != nil || c.Scope != nil {
 				return ErrInput
 			}
 		}

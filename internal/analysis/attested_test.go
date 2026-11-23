@@ -134,3 +134,41 @@ func TestAttestedRowsAreRequired(t *testing.T) {
 		t.Error("an invalid report listed unknowns in its grade")
 	}
 }
+
+// GRD-5 and PRV-15, the code review of #12: an invalid run grades nothing, so a saved invalid report's attested rows
+// stay exactly "not graded". The reviewer's mutation (SEC-4 turned not_found with a reason of its own) is refused, as
+// is any other outcome, reason, evidence or graded row; the unchanged report and a deliberate skip still read.
+func TestInvalidAttestedRowsStayNotGraded(t *testing.T) {
+	if b, _ := json.Marshal(attestedRun(t, true)); func() bool { _, err := Parse(b); return err != nil }() {
+		t.Fatal("the unchanged invalid report was refused")
+	}
+	set := func(id string, edit func(*report.Check)) func(*report.Doc) {
+		return func(d *report.Doc) {
+			for i := range d.Checks {
+				if d.Checks[i].ID == id {
+					edit(&d.Checks[i])
+				}
+			}
+		}
+	}
+	for name, mutate := range map[string]func(*report.Doc){
+		"SEC-4 not_found (the reviewer's reproduction)": set("SEC-4", func(c *report.Check) { c.Result, c.Reason = obs.NotFound, "no metadata service listed a role" }),
+		"AMP-7 a finding": set("AMP-7", func(c *report.Check) {
+			c.Result, c.Reason, c.Severity, c.EvidenceClass = obs.Finding, "", "medium", "indicator"
+		}),
+		"SEC-4 unknown, another reason":   set("SEC-4", func(c *report.Check) { c.Reason = "the box said so" }),
+		"SEC-4 not graded, with evidence": set("SEC-4", func(c *report.Check) { c.Evidence = "a role was listed" }),
+		"SEC-4 not graded, with a scope":  set("SEC-4", func(c *report.Check) { c.Scope = &report.Scope{Destination: "169.254.169.254", Port: "80"} }),
+		"a graded row nobody attested": func(d *report.Doc) { // AMP-1 is find-only, so not_found is legal for it in a valid run
+			ck, _ := catalog.Get("AMP-1")
+			d.Checks = append(d.Checks, report.Check{ID: "AMP-1", Category: ck.Category, Title: ck.Title, Kind: "find_only", Result: obs.NotFound})
+		},
+	} {
+		d := attestedRun(t, true)
+		mutate(&d)
+		b, _ := json.Marshal(d)
+		if _, err := Parse(b); err == nil {
+			t.Errorf("%s: an invalid report with a graded row was accepted", name)
+		}
+	}
+}
