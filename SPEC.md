@@ -3122,7 +3122,8 @@ platform's own setting only where a rerun proved it there, and labels everything
   `sandprobe run <recipe> -as <user> -y -out <next-folder>`; for a native provider: `sandprobe run <provider> -y -out
   <next-folder>`, each name from the fixed list; for any other report: `sandprobe run <the way you ran it> -y -out
   <next-folder>`. Then `sandprobe compare
-  <report.json> <next-folder>/*.json` and `sandprobe fix <next-folder>/*.json` with the same flags as before. The image, user, command and docker
+  <report.json> <next-folder>/*.json`, whose score line and "Got better" show what changed (CMP-2), with "No longer
+  found, but not proven" never read as fixed, and `sandprobe fix <next-folder>/*.json` with the same flags as before. The image, user, command and docker
   options stay placeholders: the report doesn't keep the person's command, and what it does keep is untrusted
   (FIX-8).
 - **FIX-8 Predictions, built from fixed text only.** Each action says its checks "should clear; a rerun proves it".
