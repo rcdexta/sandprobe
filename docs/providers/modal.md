@@ -46,22 +46,32 @@ the App stays, named in the report.
 
 You don't need the proof of concept to probe a sandbox of your own: `run exec` reaches it through any command that
 starts `sh` in it. [`examples/modal/bridge.py`](../../examples/modal/bridge.py) is one such command, built on
-Modal's Python SDK. It creates one throwaway sandbox in your own workspace (CPU only, a 15-minute timeout as a spend
-backstop), records the ID that create returned, pipes `sh` through `Sandbox.exec` as the setup's agent user, and
-terminates the sandbox by that ID, then checks that nothing with its tag still runs. The token stays with Modal's SDK
-in `~/.modal.toml`; the script never reads or prints it.
+Modal's Python SDK (1.5.5 or later). It creates one throwaway sandbox in your own workspace, CPU only, with a
+15-minute timeout as a spend backstop. It records the ID that create returned and a random tag, which it sets in the
+create request itself, in a private state file it reserves before it creates anything. If anything fails after the
+create, Ctrl-C included, it terminates that sandbox and confirms it finished. `sh` and `rm` act only on the one live
+sandbox in the `sandprobe` app that carries the recorded tag and has the recorded ID; anything else, an edited or
+copied state file included, refuses and touches nothing. The token stays with Modal's SDK in `~/.modal.toml`; the
+script never reads or prints it (FIX-10).
 
 ```sh
-pip install modal                                      # then `modal setup`, once, for ~/.modal.toml
+pip install 'modal>=1.5.5'                             # then `modal setup`, once, for ~/.modal.toml
 python3 examples/modal/bridge.py create round-0 r0.state
 sandprobe run exec -as root -y -out round-0 -- python3 examples/modal/bridge.py sh r0.state
 python3 examples/modal/bridge.py rm r0.state
-sandprobe fix round-0/*.json -provider modal            # you name the platform; fix never guesses it
+sandprobe fix round-0/*.json -platform modal            # you name the platform; fix never guesses it
 ```
 
 Then apply the top action, create a new sandbox, run again into `round-1` (with `-as agent` once the agent has its own
 user), and `sandprobe compare round-0/*.json round-1/*.json`. The script's `round-1` and `round-2` setups are the
-fixes below, applied in the order `fix` ranked them.
+fixes below.
+
+If the sandbox ended at its timeout before `rm`, `rm` finds no live sandbox with the tag and refuses, touching
+nothing. Once Modal shows that sandbox finished, delete the state file yourself. Exit 7 from any command means a
+sandbox may still run: it prints the ID, and the sandbox ends at its timeout.
+
+The bridge's guards were added after the three rounds below ran, and are tested only against a fake of Modal's SDK
+(`examples/modal/bridge_test.py`), not yet on Modal itself.
 
 `run exec` keeps SEC-4, EGR-3, AMP-6 and AMP-7 off, since each would contact an endpoint Modal owns. Leave them off:
 on Modal they are outside Sandprobe's reviewed scope, so Cloud access reads "Not tested", and `fix` lists it as not an

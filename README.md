@@ -238,7 +238,12 @@ Each action names the checks it should clear and the categories that could turn 
 on that platform, it gives that setting and what it costs: today Docker, from a fixture test, and Modal, from a run
 by hand ([docs/providers/modal.md](docs/providers/modal.md)). Everywhere else it gives the check's own fix, labelled
 general advice. Every action is a prediction: only the rerun and `compare` show it worked. `fix` reads the report
-offline and changes nothing. For a `run exec` report, `-provider <name>` says which platform the box runs on.
+offline and changes nothing. For a `run exec` report, `-platform <name>` says which platform the box runs on.
+
+An action is offered for the checks it was written for. When a setting proven elsewhere may also clear other checks,
+the action lists them under "May also clear", and each of those checks keeps its own action: dropping root may close
+`/etc/shadow` while a key in the agent's home stays readable. When the report is incomplete, `fix` says so first,
+still gives its plan, and exits 5, as `scorecard` does.
 
 On Docker the loop reaches 6/6 from a root box with a key in its environment and an open network, in five rounds:
 `--network none`, `--read-only --tmpfs /tmp`, `--user 1000:1000 --cap-drop ALL`, `--security-opt no-new-privileges`,
@@ -248,15 +253,16 @@ and the image rebuilt without the key. Read that 6/6 for what it is:
 - Two greens rest on checks that can't prove a negative: Cloud access reads "Green · not proven", and Exfiltration
   carries "not proven: DNS, UDP 53".
 - On a bare box only Sandprobe's idle process runs, so SEC-2 and SEC-5 have no other process to find. With the image's
-  own process running as the agent's user, they find it, and it takes a sixth round: the container's processes as
-  another user (`--user 1001:1001`), the agent through `-as agent`.
+  own process running, they find it. The loop then reaches 6/6 in five rounds too, with the container's processes as
+  another user (`--user 1001:1001`) and the agent through `-as agent` in place of `--user 1000:1000 --cap-drop ALL`.
 
 **For agents:** run, then `sandprobe fix <report.json> -o json`, and show your person the top action: its title, the
 checks, the setting and its costs. Apply it to the sandbox's own config or code only with their OK; never apply a
 change without it. Rerun into a new `-out` folder, `sandprobe compare` the two reports, and repeat until `fix` has
-nothing actionable or your person stops. Never add `-provider` yourself, to `fix` or to a run: pass it only when your
-person names the platform. Something under "Not an action for an agent" is never yours to change, Cloud access left
-untested included.
+nothing actionable or your person stops. Exit 5 with `complete: false` still carries a plan: say the report is
+incomplete when you show it. Never add `-platform` to `fix`, or `-provider` to a run, yourself: pass one only when
+your person names the platform. Something under "Not an action for an agent" is never yours to change, Cloud access
+left untested included.
 
 ## Send feedback
 
