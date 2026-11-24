@@ -17,6 +17,7 @@ import logging
 import os
 import re
 import secrets
+import select
 import signal
 import stat
 import sys
@@ -256,39 +257,93 @@ def sh(state):
     else:
         argv, env = AGENT + ["sh"], {"HOME": "/home/agent", "USER": "agent", "LOGNAME": "agent"}
     p = sb.exec(*argv, env=env, text=False, workdir="/work" if cfg["protect_home"] else None)
-    failed = []  # the type of whatever a pump raised; never its text
+    sys.exit(session(p))
 
-    def guard(fn, *args):
-        try:
-            fn(*args)
-        except BaseException as e:
-            failed.append(type(e).__name__)
+
+STDIN_JOIN, OUTPUT_JOIN = 2.0, 5.0  # seconds each pump may take to finish once the remote process has ended
+
+
+def session(p):
+    """FIX-10's ordered exit path: the remote's exit, then every pump stopped and joined, then one read of the failure
+    slot, then the exit code. The remote's own code passes through only when no pump failed and none timed out."""
+    stop = threading.Event()  # set once the remote process has ended: the stdin pump starts no new call after it
+    lock = threading.Lock()
+    slot = {"failed": None, "closed": False}
+
+    def record(e):
+        with lock:
+            if not slot["closed"] and slot["failed"] is None:
+                slot["failed"] = type(e).__name__
 
     def pump_in():
-        while True:
-            chunk = sys.stdin.buffer.read1(65536)
-            if not chunk:
-                break
-            p.stdin.write(chunk)
-            p.stdin.drain()
-        p.stdin.write_eof()
-        p.stdin.drain()
+        # fd 0 through select and os.read, never a buffered stream, so the loop wakes every 0.1 s and holds no
+        # stream lock. A closed or invalid descriptor reads as end of input; /dev/null and a regular file end at EOF.
+        try:
+            while not stop.is_set():
+                try:
+                    ready, _, _ = select.select([0], [], [], 0.1)
+                    chunk = os.read(0, 65536) if ready else None
+                except (OSError, ValueError):
+                    chunk = b""
+                if chunk is None:
+                    continue
+                if stop.is_set():  # the remote has ended: it gets no more input
+                    return
+                if not chunk:
+                    p.stdin.write_eof()
+                    p.stdin.drain()
+                    return
+                p.stdin.write(chunk)
+                p.stdin.drain()
+        except BaseException as e:
+            record(e)
 
-    def pump(src, dst):
-        for chunk in src:
-            dst.write(chunk if isinstance(chunk, bytes) else chunk.encode())
-            dst.flush()
+    def pump_out(src, fd):
+        # straight to the descriptor with os.write, never a buffered stream, so no thread holds a stream lock
+        try:
+            for chunk in src:
+                data = chunk if isinstance(chunk, bytes) else chunk.encode()
+                while data:
+                    data = data[os.write(fd, data):]
+        except BaseException as e:
+            record(e)
 
-    threads = [threading.Thread(target=guard, args=(pump_in,), daemon=True),
-               threading.Thread(target=guard, args=(pump, p.stderr, sys.stderr.buffer), daemon=True)]
-    for t in threads:
+    pumps = [(threading.Thread(target=pump_in, daemon=True), STDIN_JOIN),
+             (threading.Thread(target=pump_out, args=(p.stdout, 1), daemon=True), OUTPUT_JOIN),
+             (threading.Thread(target=pump_out, args=(p.stderr, 2), daemon=True), OUTPUT_JOIN)]
+    for t, _ in pumps:
         t.start()
-    guard(pump, p.stdout, sys.stdout.buffer)
-    code = p.wait()
-    threads[1].join(timeout=5)
-    if failed:
-        stop(1, f"the session with the sandbox failed ({failed[0]})")
-    sys.exit(code if isinstance(code, int) else 1)
+    code, waited = None, None
+    try:
+        code = p.wait()  # 1. the remote process ends, or waiting for it fails
+    except BaseException as e:
+        waited = type(e).__name__
+    stop.set()  # 2. every pump told to stop, then each joined within its bound
+    late = False
+    for t, bound in pumps:
+        t.join(timeout=bound)
+        late = late or t.is_alive()
+    with lock:  # 3. the slot read once; nothing writes it after this
+        slot["closed"] = True
+        failed = slot["failed"]
+    if waited:
+        line, exit_code = f"the session with the sandbox failed ({waited})", 1
+    elif failed:
+        line, exit_code = f"the session with the sandbox failed ({failed})", 1
+    elif late:
+        line, exit_code = "the session with the sandbox failed (a pump didn't finish in time)", 1
+    else:
+        line, exit_code = None, code if isinstance(code, int) else 1
+    if line:
+        _say(line)
+    for f in (sys.stdout, sys.stderr):  # 4. flush, then exit
+        try:
+            f.flush()
+        except Exception:
+            pass
+    if late:
+        os._exit(exit_code)  # a pump still runs: leave without finalizing around it
+    return exit_code
 
 
 def rm(state):

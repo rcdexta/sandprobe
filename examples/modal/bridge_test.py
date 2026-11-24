@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import types
 import unittest
 import warnings
@@ -27,6 +28,7 @@ class FakeWorld:
         self.fail_create = None  # an exception create raises before returning
         self.terminate_confirms = True
         self.fail = set()  # where the fake SDK raises SENTINEL (FIX-10's sanitizing tests)
+        self.shape = None  # a function given each new FakeProcess, to change its timing (the looped scenarios)
 
 
 def boom(where):
@@ -62,13 +64,28 @@ class FakeStream:
 
 
 class FakeProcess:
+    """Like a remote sh running a script: it ends once its input ends, or once delivering input failed."""
+
     def __init__(self):
-        self.stdin = types.SimpleNamespace(write=lambda b: boom("stdin_write"), drain=lambda: boom("drain"),
-                                           write_eof=lambda: boom("write_eof"))
+        self.ended_input = threading.Event()
+
+        def stdin_call(where, ends=False):
+            def call(*args):
+                try:
+                    boom(where)
+                except BaseException:
+                    self.ended_input.set()
+                    raise
+                if ends:
+                    self.ended_input.set()
+            return call
+        self.stdin = types.SimpleNamespace(write=stdin_call("stdin_write"), drain=stdin_call("drain"),
+                                           write_eof=stdin_call("write_eof", ends=True))
         self.stdout = FakeStream("stdout", [b"probe output\n"])
         self.stderr = FakeStream("stderr", [b"probe note\n"])
 
     def wait(self):
+        self.ended_input.wait(10)
         boom("wait")
         return 0
 
@@ -102,6 +119,10 @@ class FakeSandbox:
 
     def exec(self, *argv, **kw):
         world.calls.append(("exec", self.object_id))
+        proc = FakeProcess()
+        if world.shape:
+            world.shape(proc)
+            return proc
         if "warn" in world.fail:
             warnings.warn(SENTINEL + " in a warning")
         if "log" in world.fail:
@@ -112,7 +133,7 @@ class FakeSandbox:
             t = threading.Thread(target=lambda: boom("thread"))
             t.start()
             t.join()
-        return FakeProcess()
+        return proc
 
     def terminate(self):
         world.calls.append(("terminate", self.object_id))
@@ -188,12 +209,20 @@ class Bridge(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(os.stat(self.state).st_mode), 0o600)
         self.assertEqual(set(rec), {"id", "setup", "tag", "created"})
         self.assertEqual(world.sandboxes[0].tags, {bridge.TAG_KEY: rec["tag"]})  # tagged in the create request
-        out, sys.stdout = sys.stdout, types.SimpleNamespace(buffer=io.BytesIO())
-        sys.stdin, stdin = types.SimpleNamespace(buffer=io.BufferedReader(io.BytesIO(b"echo hi\n"))), sys.stdin
+        saved = [os.dup(fd) for fd in (0, 1, 2)]  # sh pumps fds 0, 1 and 2 themselves: point them away from the runner
+        null, sink = os.open(os.devnull, os.O_RDONLY), tempfile.TemporaryFile()
         try:
+            os.dup2(null, 0)
+            os.dup2(sink.fileno(), 1)
+            os.dup2(sink.fileno(), 2)
             self.assertEqual(exit_code(bridge.sh, self.state), 0)
         finally:
-            sys.stdout, sys.stdin = out, stdin
+            for fd, old in zip((0, 1, 2), saved):
+                os.dup2(old, fd)
+                os.close(old)
+            os.close(null)
+        sink.seek(0)
+        self.assertIn(b"probe output", sink.read())
         self.assertEqual(exit_code(bridge.rm, self.state), 0)
         self.assertFalse(os.path.exists(self.state))
         self.assertEqual(self.touched(), [("exec", rec["id"]), ("terminate", rec["id"])])
@@ -316,9 +345,103 @@ class Bridge(unittest.TestCase):
         self.assertNotIn("secret detail", sys.stderr.getvalue())
 
 
+def late(seconds, where):
+    """A call that waits, then fails with SDK text."""
+    def call(*args):
+        time.sleep(seconds)
+        raise RuntimeError(SENTINEL + " late at " + where)
+    return call
+
+
+def shapes():
+    """The looped scenarios: name -> (how the parent gives stdin, the exit code FIX-10 documents, the fake's shape)."""
+    def remote_exits_now(code=0):
+        def shape(proc):
+            proc.wait = lambda: code
+        return shape
+
+    def eof_late(proc):  # security review's reproduction: wait returns at once, write_eof fails after it
+        began = threading.Event()
+        fail = late(0.3, "write_eof")
+        proc.stdin.write_eof = lambda: (began.set(), fail())
+        proc.wait = lambda: (began.wait(5), 0)[1]
+
+    def drain_late(proc):
+        began = threading.Event()
+        fail = late(0.3, "drain")
+        proc.stdin.drain = lambda: (began.set(), fail())
+        proc.wait = lambda: (began.wait(5), 0)[1]
+
+    def write_late_running(proc):  # the write fails while the remote still runs
+        proc.stdin.write = late(0.2, "write")
+        proc.wait = lambda: (time.sleep(0.8), 0)[1]
+
+    def write_fails_mid_pump(proc):
+        n = {"writes": 0}
+
+        def write(b):
+            n["writes"] += 1
+            if n["writes"] > 3:
+                raise RuntimeError(SENTINEL + " mid-pump")
+        proc.stdin.write = write
+        proc.wait = lambda: (time.sleep(0.8), 0)[1]
+
+    def exit_then_input(proc):  # the remote ends first; input that comes later is never sent, so its code stands
+        done = threading.Event()
+
+        def write(b):
+            if done.is_set():
+                raise RuntimeError(SENTINEL + " write after exit")
+        proc.stdin.write = write
+        proc.wait = lambda: (done.set(), 3)[1]
+
+    def big_file(proc):  # still pumping a large file when the remote ends
+        proc.stdin.write = lambda b: time.sleep(0.001)
+        proc.wait = lambda: (time.sleep(0.2), 0)[1]
+
+    def stdout_late(proc):  # stdout fails after the remote ended
+        ended = threading.Event()
+
+        def out():
+            yield b"probe output\n"
+            ended.wait(5)
+            time.sleep(0.1)
+            raise RuntimeError(SENTINEL + " stdout after wait")
+        proc.stdout = out()
+        proc.wait = lambda: (ended.set(), 0)[1]
+
+    def stdout_hangs(proc):  # a pump that never ends: the join's bound, then exit 1
+        proc.stdout = iter(lambda: time.sleep(3600), b"never")
+        proc.wait = lambda: 0
+
+    return {
+        "exit_open_stdin": ("open", 0, remote_exits_now()),
+        "exit_code_passes": ("open", 3, remote_exits_now(3)),
+        "stdin_closed": ("closed", 0, None),
+        "stdin_devnull": ("devnull", 0, None),
+        "big_file": ("file", 0, big_file),
+        "write_fails_mid_pump": ("file", 1, write_fails_mid_pump),
+        "eof_late": ("devnull", 1, eof_late),
+        "drain_late": ("data", 1, drain_late),
+        "write_late_running": ("data", 1, write_late_running),
+        "exit_then_input": ("late_data", 3, exit_then_input),
+        "stdout_late": ("devnull", 1, stdout_late),
+        "stdout_hangs": ("devnull", 1, stdout_hangs),
+    }
+
+
 def child(verb, fails):
-    """One child process: create through the fake, then fail at fails and run verb through bridge.main."""
+    """One child process: create through the fake, then fail at fails (or take a looped shape) and run verb."""
     state = os.path.join(tempfile.mkdtemp(), "s.state")
+    shape = None
+    if fails and fails[0].startswith("shape:"):
+        name = fails[0][len("shape:"):]
+        how, _, shape = shapes()[name]
+        if how == "closed":
+            os.close(0)
+        if name == "stdout_hangs":
+            bridge.OUTPUT_JOIN = 1.0
+        fails = []
     if "thread" in fails:
         world.fail.add("thread")
     try:
@@ -327,27 +450,67 @@ def child(verb, fails):
         if e.code:
             raise
     world.fail |= set(fails)
+    world.shape = shape
     bridge.main(["bridge.py", verb, state])
+
+
+LOOPS = int(os.environ.get("BRIDGE_LOOPS", "50"))  # each looped scenario's runs, to catch a race
 
 
 class Sanitized(unittest.TestCase):
     """FIX-10, AGENTS rule 3: whatever the SDK raises, warns or logs, only fixed text and a type reach the terminal,
     under python -X dev, with the documented exit code."""
 
-    def run_child(self, verb, *fails):
-        p = subprocess.run([sys.executable, "-I", "-B", "-X", "dev", os.path.abspath(__file__), "--child", verb, *fails],
-                           input=b"echo hi\n", capture_output=True, timeout=60)
-        out = p.stdout.decode(errors="replace") + p.stderr.decode(errors="replace")
-        self.assertNotIn(SENTINEL, out, f"{verb} {fails}: SDK text reached the terminal:\n{out}")
-        self.assertNotIn("Traceback", out, f"{verb} {fails}: a traceback:\n{out}")
-        return p.returncode, out
+    def run_child(self, verb, *fails, stdin_mode="data"):
+        args = [sys.executable, "-I", "-B", "-X", "dev", os.path.abspath(__file__), "--child", verb, *fails]
+        keep = None
+        if stdin_mode in ("open", "late_data"):
+            r, w = os.pipe()
+            proc = subprocess.Popen(args, stdin=r, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            os.close(r)
+            keep = w
+            if stdin_mode == "late_data":
+                threading.Timer(0.5, lambda: (os.write(w, b"echo later\n"))).start()
+            try:
+                out, err = proc.communicate(timeout=60)
+            finally:
+                os.close(keep)
+            code = proc.returncode
+        else:
+            stdin = {"data": subprocess.PIPE, "devnull": subprocess.DEVNULL, "closed": subprocess.DEVNULL}.get(stdin_mode)
+            if stdin_mode == "file":
+                f = tempfile.TemporaryFile()
+                f.write(b"x" * (8 << 20))
+                f.seek(0)
+                stdin = f
+            p = subprocess.run(args, input=b"echo hi\n" if stdin == subprocess.PIPE else None,
+                               stdin=None if stdin == subprocess.PIPE else stdin, capture_output=True, timeout=60)
+            out, err, code = p.stdout, p.stderr, p.returncode
+        text = out.decode(errors="replace") + err.decode(errors="replace")
+        self.assertNotIn(SENTINEL, text, f"{verb} {fails}: SDK text reached the terminal:\n{text}")
+        self.assertNotIn("Traceback", text, f"{verb} {fails}: a traceback:\n{text}")
+        self.assertNotIn("Fatal Python error", text, f"{verb} {fails}: a runtime diagnostic:\n{text}")
+        return code, text
+
+    def loop(self, n, verb, fails, want, stdin_mode="data"):
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(8) as pool:
+            results = list(pool.map(lambda _: self.run_child(verb, *fails, stdin_mode=stdin_mode), range(n)))
+        codes = [c for c, _ in results]
+        bad = [c for c in codes if c != want]
+        self.assertEqual(bad, [], f"{verb} {fails}: {len(bad)} of {n} runs exited otherwise than {want}: {sorted(set(codes))}")
 
     def test_sh_failures(self):
         for fail in ("stdout", "stderr", "stdin_write", "drain", "write_eof", "wait"):
             with self.subTest(fail=fail):
+                self.loop(LOOPS, "sh", (fail,), 1)
                 code, out = self.run_child("sh", fail)
-                self.assertEqual(code, 1, out)
                 self.assertIn("RuntimeError", out)
+
+    def test_lifecycle(self):
+        for name, (how, want, _) in shapes().items():
+            with self.subTest(scenario=name):
+                self.loop(LOOPS, "sh", ("shape:" + name,), want, stdin_mode=how)
 
     def test_sh_list_failure_refuses(self):
         code, out = self.run_child("sh", "list")
