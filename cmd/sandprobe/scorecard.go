@@ -82,13 +82,18 @@ func writeInside(dir, name string, data []byte) error {
 	return f.Close()
 }
 
-// printable is text from a saved report made safe for a terminal: every control character, ESC included, is shown
-// escaped, so a report can't move the cursor, recolor or hide the score around it.
+// printable is text from a box, CLI argument or saved report made safe for a terminal: every control character
+// (ESC included), Unicode format character (category Cf: bidi overrides/isolates, ALM, zero-width, BOM) and line or
+// paragraph separator is shown escaped, so untrusted text cannot move the cursor, recolor, reorder or hide output.
 func printable(s string) string {
 	var b strings.Builder
 	for _, r := range s {
-		if unicode.IsControl(r) || r == 0x2028 || r == 0x2029 {
-			fmt.Fprintf(&b, "\\u%04x", r)
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || unicode.Is(unicode.Zl, r) || unicode.Is(unicode.Zp, r) {
+			if r <= 0xFFFF {
+				fmt.Fprintf(&b, "\\u%04x", r)
+			} else {
+				fmt.Fprintf(&b, "\\U%08x", r)
+			}
 			continue
 		}
 		b.WriteRune(r)

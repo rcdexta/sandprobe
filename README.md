@@ -208,8 +208,8 @@ skipped, missing, scoped out, unknown or unproven. They answer different questio
 every check was conclusive. Reading a saved report (`scorecard`, `profile`, `assess`, `compare`) checks its structure
 only: it can't re-verify the run or tell an edited report apart, and each says so.
 
-Exit codes: 0 graded, 2 usage, 3 needs approval, 4 needs login, 5 incomplete or invalid, 6 score below `-min` (`0`–`6` or `full`), 7 a box not
-confirmed deleted. `-o json` gives agents the plan, the report and every error as JSON.
+Exit codes: 0 graded, 2 usage, 3 needs approval, 4 needs login, 5 incomplete or invalid, 6 green-category score below `-min` (`0`–`6` or `full`), 7 a box not
+confirmed deleted. `-min` gates only the green-category count (not finding severity inside an already-red category or proof coverage); use `sandprobe compare` or `-o json` to fail CI on severity or proof regressions. `-o json` gives agents the plan, the report and every error as JSON, and `SANDPROBE_NO_KEYS=1` skips post-run keys in interactive terminals.
 
 Research harnesses, such as the managed Nitro and Daytona coding evaluations, live in
 [experiments/](experiments/README.md). They aren't part of the product. Their run records stay local and must not be

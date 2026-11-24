@@ -31,3 +31,21 @@ func termSize(fd int) (cols, rows int) {
 	}
 	return int(ws.Col), int(ws.Row)
 }
+
+func isForegroundTTY(fd int) bool {
+	pgrp, err := unix.IoctlGetInt(fd, unix.TIOCGPGRP)
+	if err != nil || pgrp <= 0 {
+		return true
+	}
+	return pgrp == unix.Getpgrp()
+}
+
+func pollFD(fd int, timeoutMS int) (ready, hup bool, err error) {
+	pfd := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
+	n, err := unix.Poll(pfd, timeoutMS)
+	if err != nil {
+		return false, false, err
+	}
+	rev := pfd[0].Revents
+	return n > 0 && rev&unix.POLLIN != 0, rev&(unix.POLLHUP|unix.POLLERR|unix.POLLNVAL) != 0, nil
+}

@@ -69,7 +69,7 @@ func (r *runFlags) register(fs *flag.FlagSet) {
 	fs.StringVar(&r.org, "org", os.Getenv("SANDPROBE_SPRITES_ORG"), "the Sprites org for the throwaway sprite")
 	fs.StringVar(&r.canary, "canary", os.Getenv("SANDPROBE_CANARY"), "an operator canary's state file (deploy/canary.sh), used only when named; the hosted canary otherwise (HCN-5)")
 	fs.StringVar(&r.outDir, "out", "sandprobe-reports", "where the JSON and web reports go")
-	fs.StringVar(&r.min, "min", "", "exit 6 when the score is below 0..6, or below full (every applicable category green)")
+	fs.StringVar(&r.min, "min", "", "exit 6 when green categories are below 0..6, or below full (category count only; use compare or -o json to gate severity or proof regressions)")
 	fs.StringVar(&r.theme, "theme", "graphite", "the web report's palette: graphite or mission")
 	fs.BoolVar(&r.allowLocalProxy, "allow-local-proxy", false, "docker, aws-nitro, and exec or a recipe with -provider-endpoints EGR-3: let EGR-3 use a proxy on the box's own loopback (UX-4); providers that exclude EGR-3 ignore or refuse it")
 	fs.StringVar(&r.setup, "setup", "", "sprites: your sandbox's setup script, run once in the new sprite before the checkpoint (SPR-1)")
@@ -498,8 +498,14 @@ func plan(o opts, r runFlags, args []string) error {
 }
 
 func runCmd(o opts, r runFlags, args []string, stderr io.Writer) (int, error) {
-	if _, _, ok := parseMin(r.min); !ok {
-		return 0, fail("usage", "-min takes a score from 0 to 6, or full", "-min 6", exitUsage)
+	wantMin, fullMin, ok := parseMin(r.min)
+	if !ok {
+		return 0, fail("usage", "-min takes a score from 0 to 6, or full", "-min 6 or -min full", exitUsage)
+	}
+	if !fullMin && wantMin == 6 && len(args) > 0 {
+		if pol := report.PolicyKinds(args[0]); pol["SEC-4"] == obs.SkipProviderTerms && pol["AMP-7"] == obs.SkipProviderTerms {
+			return 0, fail("usage", "-min 6 can never pass on "+args[0]+": Cloud access is not applicable under the provider's terms, so the score is out of 5", "use -min full (every applicable category green) or -min 5", exitUsage)
+		}
 	}
 	if len(args) == 1 && args[0] == "exec" {
 		return runExec(o, r, false, stderr)

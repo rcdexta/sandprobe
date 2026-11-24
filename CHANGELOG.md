@@ -5,6 +5,31 @@ their build attestations are on [GitHub Releases](https://github.com/summationai
 
 ## Unreleased
 
+### Terminal, score and CI gate
+
+- **Breaking (`-min`):** `-min` now takes a green-category count (`0` to `6`) or `full` (`Score == Of`, every applicable
+  category green), exiting 6 when a valid run scores below it (OUT-4). Retired letter thresholds (`-min A` to `-min F`)
+  and `-min 6` on native adapters whose score is out of 5 are refused before creation with usage exit 2. `-min` gates
+  only the green-category count: use `sandprobe compare` or validated `-o json` output to gate CI on severity increases
+  inside an already-red category or proof-coverage regressions.
+- `sandprobe run` prints a compact 80-column score summary with `SCORE x/y` (or `SCORE none` on an invalid run, with no
+  category rows or counts), coverage counts, the six exposure categories, the top chain or finding with canary receipt
+  routes and `Fix first`, explicit cleanup confirmation (or a loud `CLEANUP UNCONFIRMED (exit 7)` warning), and the
+  HTML report path, with no letter grade in terminal text (UX-6, SCR-3). `grade.letter` in `OUT-1` JSON is unchanged.
+- A category that is green solely on find-only `not_found` checks (`Conclusive == 0`, such as Cloud access when neither
+  metadata nor a Kubernetes API answered) now shows as `◌ GREEN · NOT PROVEN` in `run` and `scorecard`, and with a
+  dashed `GREEN · NOT PROVEN` badge in the web report and workload exposure page, while still counting toward the score
+  (SCR-2, OUT-2, UX-9). Existing `sandprobe.workload-exposure/1` records without `green_not_proven` remain renderable.
+- Interactive runs update plan-derived host phases (`network`, `canary`, `box`, `probe`, `reset` where applicable, and
+  `delete`/`cleanup`/`retain`) in place on TTY `stderr`, and offer single-key post-run actions (`Enter`/`j`/`k` to walk
+  findings and unknowns, `e` to explain a check, `c` to copy a fix, `o` to open the HTML report, `q`/`Esc` to quit) on
+  foreground TTYs when `CI` and `SANDPROBE_NO_KEYS` are unset, auto-exiting after 15 seconds if untouched and restoring
+  terminal state on `EOF` and termination/suspension signals (UX-5, UX-7, AGT-1).
+- Terminal output escapes Unicode `Cf` format characters (bidi overrides/isolates, ALM, zero-width characters, BOM) in
+  addition to control characters and line separators, accounts for wide East Asian and emoji display widths when
+  wrapping to 80 columns, and honors `NO_COLOR`, `TERM=dumb`, ASCII `C`/`POSIX` locales and
+  `SANDPROBE_REDUCED_MOTION=1` (UX-9).
+
 ## 0.3.0-rc.2 (2026-11-23)
 
 The second release candidate for 0.3.0: the web report's new layout. Checks and grading are unchanged from rc.1.

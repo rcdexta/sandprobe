@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 	"unicode"
-	"unicode/utf8"
 
 	"sandprobe/internal/catalog"
 	"sandprobe/internal/host"
@@ -28,8 +27,8 @@ func assertWidthAndNoLetter(t *testing.T, label, rendered string, maxCols int) {
 	}
 	for i, rawLine := range strings.Split(rendered, "\n") {
 		plain := ansiSGR.ReplaceAllString(rawLine, "")
-		if cols := utf8.RuneCountInString(plain); cols > maxCols {
-			t.Errorf("%s: line %d is %d columns (> %d): %q", label, i+1, cols, maxCols, plain)
+		if cols := displayWidth(plain); cols > maxCols {
+			t.Errorf("%s: line %d is %d display columns (> %d): %q", label, i+1, cols, maxCols, plain)
 		}
 	}
 }
@@ -78,7 +77,7 @@ func TestResultGoldenNonTTY(t *testing.T) {
 	}
 }
 
-// UX-6, SCR-2, OUT-4: every run state renders accurately and stays within <= 80 columns (and narrower TTY widths).
+// UX-6, SCR-2, OUT-4, UX-9: every run state (including wide CJK/emoji box strings) renders accurately and stays <= 80 display columns.
 func TestResultStatesAndWidth(t *testing.T) {
 	vibe := loadReportJSON(t, "../../demo/reports/vibe.json")
 	hardened := loadReportJSON(t, "../../demo/reports/hardened.json")
@@ -94,6 +93,10 @@ func TestResultStatesAndWidth(t *testing.T) {
 	cleanAllProven.Run.Box.Name = "sandprobe-clean-box"
 	cleanAllProven.Identity = &obs.Identity{UID: 1000}
 	cleanAllProven.Cleanup.Outcome = "deleted and confirmed gone"
+
+	wideCJK := cleanAllProven
+	wideCJK.Run.Box.Name = "サンドプローブ検証コンテナ名前がとても長いテスト環境🧪🔒サンドプローブ検証コンテナ"
+	wideCJK.Cleanup.Outcome = "削除確認済み：コンテナとネットワークおよび一時ボリュームを完全に削除しました"
 
 	invalidDoc := doc("", false, false)
 	invalidDoc.Grade.Invalid = "probe SHA-256 mismatch on returned observations"
@@ -130,6 +133,15 @@ func TestResultStatesAndWidth(t *testing.T) {
 				"No findings across tested checks.",
 			},
 			forbid: []string{"GREEN · NOT PROVEN", "✗ RED"},
+		},
+		{
+			name:    "wide CJK and emoji wrap within display column budget",
+			d:       wideCJK,
+			cleaned: true,
+			mustHave: []string{
+				"SCORE 6/6  6 of 6 categories green",
+				"サンドプローブ",
+			},
 		},
 		{
 			name:    "hardened 6/6 with Green not proven Cloud access",
@@ -212,12 +224,28 @@ func TestResultStatesAndWidth(t *testing.T) {
 	}
 }
 
-// UX-6, UX-9, SCR-3: hostile control characters, ESC sequences, CR/LF and Unicode line separators in box/report
-// fields are escaped before terminal emission, and category rows carry zero box-controlled strings.
+func assertNoControlOrFormatRunes(t *testing.T, label, s string) {
+	t.Helper()
+	for _, r := range s {
+		if r == '\n' {
+			continue
+		}
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || unicode.Is(unicode.Zl, r) || unicode.Is(unicode.Zp, r) {
+			t.Fatalf("%s: unescaped control/format rune U+%04X in output:\n%q", label, r, s)
+		}
+	}
+}
+
+// UX-6, UX-7, UX-9, SCR-3: hostile control characters, ESC sequences, CR/LF, Unicode line/paragraph separators,
+// and category Cf format controls (ALM U+061C, zero-width U+200B, LRM U+200E, RLO U+202E, LRI U+2066, PDI U+2069,
+// BOM U+FEFF, and supplemental tag U+E0001) are escaped across result, live phase, invalid reason, and walker paths,
+// and category rows carry zero box-controlled strings.
 func TestTerminalInjectionEscaped(t *testing.T) {
-	payload := "evil\x1b[2J\x1b]0;pwned\x07\r\nline2\u2028sep\u2029end"
-	d := doc("D", true, true)
-	d.Run.Provider = "docker\x1b[31m"
+	cfSet := "\u061c\u200b\u200e\u202e\u2066\u2069\ufeff\U000e0001"
+	payload := "evil\x1b[2J\x1b]0;pwned\x07\r\nline2\u2028sep\u2029" + cfSet + "end"
+
+	d := doc("D", true, false)
+	d.Run.Provider = "docker\x1b[31m\u202e"
 	d.Run.Box.Name = payload
 	for i := range d.Checks {
 		if d.Checks[i].ID == "SEC-1" {
@@ -225,28 +253,28 @@ func TestTerminalInjectionEscaped(t *testing.T) {
 			d.Checks[i].Evidence = "BOX-SENTINEL-" + payload
 			d.Checks[i].Reason = "BOX-SENTINEL-" + payload
 		}
+		if d.Checks[i].ID == "AMP-2" {
+			d.Checks[i].Reason = "unk-" + payload
+			d.Checks[i].Evidence = "ev-" + payload
+		}
 	}
 	d.Findings = []report.Finding{{
 		ID:       "SEC-1",
-		Severity: "high\x1b[2J",
+		Severity: "high\x1b[2J\u202e",
 		Title:    payload,
 		Gets:     payload,
 		Fix:      payload,
 	}}
-	d.Receipts = []obs.Receipt{{Nonce: "n1", Proto: "tcp\x1b[2J", Port: 443}}
+	d.Receipts = []obs.Receipt{{Nonce: "n1", Proto: "tcp\x1b[2J\u202e", Port: 443}}
 	d.Cleanup.Outcome = payload
 
-	got := renderResult(d, "sandprobe-reports/out\x1b[2J", false, termCaps{width: 80})
-	for _, r := range got {
-		if r == '\n' {
-			continue
+	// 1. Result summary path.
+	got := renderResult(d, "sandprobe-reports/out\x1b[2J\u202e", false, termCaps{width: 80})
+	assertNoControlOrFormatRunes(t, "renderResult", got)
+	for _, want := range []string{`\u001b[2J`, `\u2028`, `\u061c`, `\u200b`, `\u200e`, `\u202e`, `\u2066`, `\u2069`, `\ufeff`, `\U000e0001`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("renderResult missing escaped %s:\n%s", want, got)
 		}
-		if unicode.IsControl(r) || r == 0x2028 || r == 0x2029 {
-			t.Fatalf("unescaped control rune U+%04X in output:\n%q", r, got)
-		}
-	}
-	if !strings.Contains(got, `\u001b[2J`) || !strings.Contains(got, `\u2028`) {
-		t.Fatalf("expected escaped sequences in output:\n%s", got)
 	}
 	for _, line := range strings.Split(got, "\n") {
 		if strings.Contains(line, "Secrets") && strings.Contains(line, "BOX-SENTINEL") {
@@ -254,14 +282,40 @@ func TestTerminalInjectionEscaped(t *testing.T) {
 		}
 	}
 
-	// Invalid run reason also escaped.
+	// 2. Invalid run reason path.
 	inv := doc("", false, false)
 	inv.Grade.Invalid = payload
-	invGot := renderResult(inv, "sandprobe-reports/inv", true, termCaps{width: 80})
-	for _, r := range invGot {
-		if r != '\n' && (unicode.IsControl(r) || r == 0x2028 || r == 0x2029) {
-			t.Fatalf("unescaped control rune U+%04X in invalid output:\n%q", r, invGot)
-		}
+	invGot := renderResult(inv, "sandprobe-reports/inv\u202e", true, termCaps{width: 80})
+	assertNoControlOrFormatRunes(t, "invalid-renderResult", invGot)
+	invJoined := strings.ReplaceAll(invGot, "\n          ", "")
+	if !strings.Contains(invJoined, `\u202e`) || !strings.Contains(invJoined, `\u061c`) {
+		t.Fatalf("invalid output missing escaped Cf runes:\n%s", invGot)
+	}
+
+	// 3. Live phase path.
+	var phaseErr bytes.Buffer
+	lv := newLive(opts{out: "text"}, &phaseErr, "docker\u202e", livePhasesFor("docker", false, false))
+	lv.phase("box", "container %s started", payload)
+	lv.close(true)
+	assertNoControlOrFormatRunes(t, "livePhase", phaseErr.String())
+	if !strings.Contains(phaseErr.String(), `\u202e`) || !strings.Contains(phaseErr.String(), `\ufeff`) {
+		t.Fatalf("livePhase missing escaped Cf runes:\n%s", phaseErr.String())
+	}
+
+	// 4. Walker path (finding item, unknown item, open error path, and explain lookup).
+	var walkOut bytes.Buffer
+	runKeyLoop(
+		&oneKeyReader{keys: []string{"\n", "j", "e", "o", "q"}},
+		&walkOut,
+		d,
+		"missing-\u202e-report",
+		true,
+		termCaps{tty: true, width: 80},
+		walkerHooks{open: func(string) error { return nil }},
+	)
+	assertNoControlOrFormatRunes(t, "walker", walkOut.String())
+	if !strings.Contains(walkOut.String(), `\u202e`) {
+		t.Fatalf("walker output missing escaped RLO:\n%s", walkOut.String())
 	}
 }
 
@@ -377,13 +431,17 @@ func TestLivePhasesFromPlan(t *testing.T) {
 	}
 }
 
-// UX-7, AGT-1: finish never blocks or reads stdin on non-TTY stdout, and runKeyLoop steps through findings,
-// explains checks, copies fixes, opens the report, and exits cleanly on q or Esc.
+// UX-7, AGT-1: finish never blocks or reads stdin on non-TTY stdout; runKeyLoop steps through findings,
+// explains checks, copies fixes, resolves leading-"-" -out paths to absolute paths before opening, and exits on q/Esc.
 func TestWalkerKeysNeverHangNonTTY(t *testing.T) {
 	vibe := loadReportJSON(t, "../../demo/reports/vibe.json")
-	dir := t.TempDir()
+	work := t.TempDir()
+	t.Chdir(work)
+
+	// Leading-dash output directory: must never pass a "-" argument to open/xdg-open.
+	dashDir := "-dash-out"
 	var nonTTYOut bytes.Buffer
-	code, err := finish(opts{out: "text", stdout: &nonTTYOut}, runFlags{outDir: dir, theme: "graphite"}, vibe, true)
+	code, err := finish(opts{out: "text", stdout: &nonTTYOut}, runFlags{outDir: dashDir, theme: "graphite"}, vibe, true)
 	if err != nil || code != exitGraded {
 		t.Fatalf("finish non-TTY: code=%d err=%v", code, err)
 	}
@@ -391,14 +449,14 @@ func TestWalkerKeysNeverHangNonTTY(t *testing.T) {
 		t.Fatalf("non-TTY finish printed interactive key bar:\n%s", nonTTYOut.String())
 	}
 
+	base := filepath.Join(dashDir, "sandprobe-"+vibe.Run.Provider+"-"+vibe.Run.ID)
 	var opened, copied string
 	hooks := walkerHooks{
 		open: func(p string) error { opened = p; return nil },
 		copy: func(s string) error { copied = s; return nil },
 	}
 	var loopOut bytes.Buffer
-	// Feed one keypress per Read via a deterministic key reader.
-	runKeyLoop(&oneKeyReader{keys: []string{"\n", "j", "e", "c", "o", "b", "q"}}, &loopOut, vibe, "out/rep", true, termCaps{tty: true, width: 80}, hooks)
+	runKeyLoop(&oneKeyReader{keys: []string{"\n", "j", "e", "c", "o", "b", "q"}}, &loopOut, vibe, base, true, termCaps{tty: true, width: 80}, hooks)
 
 	got := loopOut.String()
 	assertWidthAndNoLetter(t, "walker", got, 80)
@@ -408,15 +466,15 @@ func TestWalkerKeysNeverHangNonTTY(t *testing.T) {
 		"[2/16] SEC-1",
 		"SEC-1 Secret-shaped names in the agent's environment",
 		"Copied fix for SEC-1",
-		"Opened out/rep.html",
+		"Opened",
 		"SCORE 1/6",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("walker output missing %q:\n%s", want, got)
 		}
 	}
-	if opened != "out/rep.html" {
-		t.Errorf("open hook got %q", opened)
+	if !filepath.IsAbs(opened) || strings.HasPrefix(opened, "-") || !strings.HasSuffix(opened, filepath.Join("-dash-out", "sandprobe-docker-"+vibe.Run.ID+".html")) {
+		t.Fatalf("open hook got non-absolute or unsafe path %q", opened)
 	}
 	if !strings.Contains(copied, "Keep credentials out of the agent's environment") {
 		t.Errorf("copy hook got %q", copied)
@@ -424,7 +482,7 @@ func TestWalkerKeysNeverHangNonTTY(t *testing.T) {
 
 	// Esc exits immediately too.
 	var escOut bytes.Buffer
-	runKeyLoop(&oneKeyReader{keys: []string{"\x1b"}}, &escOut, vibe, filepath.Join(dir, "rep"), true, termCaps{tty: true, width: 80}, hooks)
+	runKeyLoop(&oneKeyReader{keys: []string{"\x1b"}}, &escOut, vibe, base, true, termCaps{tty: true, width: 80}, hooks)
 	if !strings.Contains(escOut.String(), "[q] quit") {
 		t.Errorf("Esc walker did not render initial bar: %q", escOut.String())
 	}
@@ -477,7 +535,7 @@ func TestMinScoreGate(t *testing.T) {
 		{"6/6 meets -min full", sixOfSix, true, "full", exitGraded},
 		{"6/6 meets -min FULL", sixOfSix, true, "FULL", exitGraded},
 		{"5/5 meets -min full", fiveOfFive, true, "full", exitGraded},
-		{"5/5 fails -min 6", fiveOfFive, true, "6", exitBelowMin},
+		{"5/5 fails -min 6 in exitFor", fiveOfFive, true, "6", exitBelowMin},
 		{"0/6 meets -min 0", doc("F", true, true), true, "0", exitGraded},
 		{"incomplete below -min exits 6 over 5", doc("D", true, false), true, "5", exitBelowMin},
 		{"incomplete meeting -min exits 5", doc("C", true, false), true, "3", exitPartial},
@@ -493,7 +551,7 @@ func TestMinScoreGate(t *testing.T) {
 	// Retired letters and out-of-range values are refused with usage exit 2 before any provider runs.
 	for _, bad := range []string{"A", "B", "C", "D", "F", "a", "-1", "7", "10", "all"} {
 		var out, errs bytes.Buffer
-		code := run([]string{"run", "sprites", "-min", bad, "-o", "json"}, &out, &errs)
+		code := run([]string{"run", "docker", "unused-img", "-min", bad, "-o", "json"}, &out, &errs)
 		if code != exitUsage || !strings.Contains(out.String(), `"error": "usage"`) || !strings.Contains(out.String(), "-min 6") {
 			t.Errorf("-min %q: code=%d out=%s", bad, code, out.String())
 		}
@@ -502,5 +560,53 @@ func TestMinScoreGate(t *testing.T) {
 	for _, id := range catalog.IDs() {
 		card := renderExplainCard(id, 80, tuiStyle{})
 		assertWidthAndNoLetter(t, "explain-"+id, card, 80)
+	}
+}
+
+// OUT-4: -min 6 is refused up front on 5/5 provider-terms adapters pointing to -min full, and -min is explicitly
+// documented/tested as a category-count gate only (same-category severity or proven-to-not_found regressions do not trip it).
+func TestMinScoreGateLimitations(t *testing.T) {
+	for _, prov := range []string{"sprites", "e2b", "baseten", "daytona", "vercel", "cloudflare", "boat", "exe.dev"} {
+		var out, errs bytes.Buffer
+		code := run([]string{"run", prov, "-min", "6", "-o", "json"}, &out, &errs)
+		if code != exitUsage || !strings.Contains(out.String(), "-min full") {
+			t.Errorf("%s -min 6: got code=%d, out=%s", prov, code, out.String())
+		}
+	}
+
+	// 1. Same-category severity increase (low -> critical inside Privilege) keeps Score 5/6 and exits 0 under -min 5.
+	lowPriv := doc("A", true, true)
+	critPriv := doc("A", true, true)
+	for i := range lowPriv.Checks {
+		if lowPriv.Checks[i].ID == "AMP-3" {
+			lowPriv.Checks[i].Result = obs.Finding
+			lowPriv.Checks[i].Severity = "low"
+		}
+		if critPriv.Checks[i].ID == "AMP-2" {
+			critPriv.Checks[i].Result = obs.Finding
+			critPriv.Checks[i].Severity = "critical"
+		}
+	}
+	if report.Score(lowPriv).Score != 5 || report.Score(critPriv).Score != 5 {
+		t.Fatal("expected both lowPriv and critPriv to score 5/6")
+	}
+	if exitFor(lowPriv, true, "5") != exitGraded || exitFor(critPriv, true, "5") != exitGraded {
+		t.Fatal("expected -min 5 to treat both 5/6 runs identically regardless of severity inside Privilege")
+	}
+
+	// 2. Proven pass degrading to find-only not_found (GREEN -> GREEN · NOT PROVEN) keeps Score 6/6 and exits 0 under -min full.
+	provenSix := doc("A", true, true)
+	unprovenCloud := doc("A", true, true)
+	for i := range unprovenCloud.Checks {
+		if unprovenCloud.Checks[i].ID == "SEC-4" || unprovenCloud.Checks[i].ID == "AMP-7" {
+			unprovenCloud.Checks[i].Result = obs.NotFound
+		}
+	}
+	sc := report.Score(unprovenCloud)
+	if sc.Score != 6 || sc.Of != 6 || !sc.Rows[4].GreenNotProven {
+		t.Fatalf("expected 6/6 with Cloud access GreenNotProven, got %d/%d %+v", sc.Score, sc.Of, sc.Rows[4])
+	}
+	if exitFor(provenSix, true, "full") != exitGraded || exitFor(unprovenCloud, true, "full") != exitGraded {
+		t.Fatal("expected -min full to exit 0 for both proven 6/6 and GreenNotProven 6/6")
 	}
 }

@@ -1,15 +1,20 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
+	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
-	"unicode/utf8"
+	"unicode"
 
 	"sandprobe/internal/catalog"
 	"sandprobe/internal/obs"
@@ -18,6 +23,12 @@ import (
 
 // maxTUIWidth is UX-9's 80-column budget for all rendered terminal views.
 const maxTUIWidth = 80
+
+// defaultKeyIdleTimeout bounds how long the post-run key bar waits on an untouched TTY before exiting (UX-7, AGT-1).
+const (
+	defaultKeyIdleTimeout = 15 * time.Second
+	activeKeyIdleTimeout  = 2 * time.Minute
+)
 
 // termCaps describes the active terminal environment (UX-9, AGT-1).
 type termCaps struct {
@@ -210,7 +221,7 @@ func newLive(o opts, stderr io.Writer, provider string, phases []livePhase) *liv
 	}
 	f, ok := stderr.(*os.File)
 	dumb := strings.EqualFold(strings.TrimSpace(os.Getenv("TERM")), "dumb")
-	if ok && isTerminal(f) && !dumb {
+	if ok && isTerminal(f) && !dumb && os.Getenv("CI") == "" {
 		cols := maxTUIWidth
 		if c, _ := termSize(int(f.Fd())); c > 0 && c < maxTUIWidth {
 			cols = c
@@ -310,11 +321,11 @@ func (lv *liveTracker) redrawLocked() {
 		}
 		detail := lv.details[p.ID]
 		plainPrefix := fmt.Sprintf("  %s %-10s ", mark, p.Label)
-		avail := w - runeWidth(plainPrefix)
+		avail := w - displayWidth(plainPrefix)
 		if avail < 10 {
 			avail = 10
 		}
-		detail = clipRunes(detail, avail)
+		detail = clipCols(detail, avail)
 		if detail != "" {
 			lines = append(lines, fmt.Sprintf("  %s%s %-10s%s %s%s%s", col, mark, p.Label, st.reset, st.dim, detail, st.reset))
 		} else {
@@ -450,10 +461,10 @@ func renderResult(d report.Doc, base string, cleaned bool, caps termCaps) string
 		case row.Green && row.GreenNotProven:
 			// Distinct symbol + words so Green · not proven is never mistaken for proven green (SCR-2, UX-9).
 			line := fmt.Sprintf("  %s%s %s%s  %s", st.gnp, g.gnp, g.gnpWords, st.reset, printable(row.Name))
-			plainLen := 2 + runeWidth(g.gnp) + 1 + runeWidth(g.gnpWords) + 2 + runeWidth(printable(row.Name))
+			plainLen := 2 + displayWidth(g.gnp) + 1 + displayWidth(g.gnpWords) + 2 + displayWidth(printable(row.Name))
 			detail := printable(row.NotProven)
 			if detail != "" {
-				if plainLen+2+runeWidth(detail) <= w {
+				if plainLen+2+displayWidth(detail) <= w {
 					b.WriteString(line + "  " + st.dim + detail + st.reset + "\n")
 				} else {
 					b.WriteString(line + "\n")
@@ -612,8 +623,8 @@ func writeHeader(b *strings.Builder, left, right string, w int, st tuiStyle) {
 		writeWrapped(b, "  ", "    ", left, w, st.bold, st.reset)
 		return
 	}
-	if 2+runeWidth(left)+2+runeWidth(right) <= w {
-		pad := w - 2 - runeWidth(left) - runeWidth(right)
+	if 2+displayWidth(left)+2+displayWidth(right) <= w {
+		pad := w - 2 - displayWidth(left) - displayWidth(right)
 		fmt.Fprintf(b, "  %s%s%s%s%s%s%s\n", st.bold, left, st.reset, strings.Repeat(" ", pad), st.dim, right, st.reset)
 		return
 	}
@@ -623,14 +634,14 @@ func writeHeader(b *strings.Builder, left, right string, w int, st tuiStyle) {
 
 func joinLR(left, right string, w int, leftCol, rightCol, reset string) string {
 	if right == "" {
-		return leftCol + clipRunes(left, w) + reset
+		return leftCol + clipCols(left, w) + reset
 	}
-	availLeft := w - runeWidth(right) - 2
+	availLeft := w - displayWidth(right) - 2
 	if availLeft < 12 {
-		return leftCol + clipRunes(left, w) + reset
+		return leftCol + clipCols(left, w) + reset
 	}
-	l := clipRunes(left, availLeft)
-	pad := w - runeWidth(l) - runeWidth(right)
+	l := clipCols(left, availLeft)
+	pad := w - displayWidth(l) - displayWidth(right)
 	if pad < 1 {
 		pad = 1
 	}
@@ -638,8 +649,8 @@ func joinLR(left, right string, w int, leftCol, rightCol, reset string) string {
 }
 
 func writeStyledPrefixWrapped(b *strings.Builder, prefixPlain, prefixStyled, contIndent, text string, w int, bodyCol, reset string) {
-	firstAvail := w - runeWidth(prefixPlain)
-	contAvail := w - runeWidth(contIndent)
+	firstAvail := w - displayWidth(prefixPlain)
+	contAvail := w - displayWidth(contIndent)
 	if firstAvail < 12 || contAvail < 12 {
 		b.WriteString(prefixStyled + bodyCol + text + reset + "\n")
 		return
@@ -655,8 +666,8 @@ func writeStyledPrefixWrapped(b *strings.Builder, prefixPlain, prefixStyled, con
 }
 
 func writeWrapped(b *strings.Builder, firstPrefix, contIndent, text string, w int, col, reset string) {
-	firstAvail := w - runeWidth(firstPrefix)
-	contAvail := w - runeWidth(contIndent)
+	firstAvail := w - displayWidth(firstPrefix)
+	contAvail := w - displayWidth(contIndent)
 	if firstAvail < 12 || contAvail < 12 {
 		b.WriteString(firstPrefix + col + text + reset + "\n")
 		return
@@ -671,7 +682,7 @@ func writeWrapped(b *strings.Builder, firstPrefix, contIndent, text string, w in
 	}
 }
 
-// wrapText wraps plain printable text so line 0 has at most firstWidth runes and later lines at most nextWidth runes.
+// wrapText wraps plain printable text so line 0 fits within firstWidth terminal columns and later lines within nextWidth.
 func wrapText(s string, firstWidth, nextWidth int) []string {
 	if s == "" {
 		return []string{""}
@@ -689,18 +700,18 @@ func wrapText(s string, firstWidth, nextWidth int) []string {
 		limit = nextWidth
 	}
 	for _, word := range words {
-		for runeWidth(word) > limit {
+		for displayWidth(word) > limit {
 			if cur != "" {
 				flush()
 			}
-			head, rest := splitAtRunes(word, limit)
+			head, rest := splitAtCols(word, limit)
 			lines = append(lines, head)
 			limit = nextWidth
 			word = rest
 		}
 		if cur == "" {
 			cur = word
-		} else if runeWidth(cur)+1+runeWidth(word) <= limit {
+		} else if displayWidth(cur)+1+displayWidth(word) <= limit {
 			cur += " " + word
 		} else {
 			flush()
@@ -713,40 +724,86 @@ func wrapText(s string, firstWidth, nextWidth int) []string {
 	return lines
 }
 
-func splitAtRunes(s string, n int) (string, string) {
-	if n <= 0 {
+// runeCols returns the terminal column width of r (0 for combining/control/format, 2 for East Asian Wide/Fullwidth
+// and wide emoji blocks, 1 otherwise).
+func runeCols(r rune) int {
+	if unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Me, r) || unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+		return 0
+	}
+	if isWideRune(r) {
+		return 2
+	}
+	return 1
+}
+
+func isWideRune(r rune) bool {
+	return r >= 0x1100 && (r <= 0x115F ||
+		r == 0x2329 || r == 0x232A ||
+		(r >= 0x2E80 && r <= 0x303E) ||
+		(r >= 0x3040 && r <= 0xA4CF && r != 0x303F) ||
+		(r >= 0xAC00 && r <= 0xD7A3) ||
+		(r >= 0xF900 && r <= 0xFAFF) ||
+		(r >= 0xFE10 && r <= 0xFE19) ||
+		(r >= 0xFE30 && r <= 0xFE6F) ||
+		(r >= 0xFF00 && r <= 0xFF60) ||
+		(r >= 0xFFE0 && r <= 0xFFE6) ||
+		(r >= 0x1F300 && r <= 0x1FAFF) ||
+		(r >= 0x20000 && r <= 0x3FFFD))
+}
+
+func displayWidth(s string) int {
+	cols := 0
+	for _, r := range s {
+		cols += runeCols(r)
+	}
+	return cols
+}
+
+func splitAtCols(s string, maxCols int) (string, string) {
+	if maxCols <= 0 {
 		return "", s
 	}
-	count := 0
-	for idx := range s {
-		if count == n {
+	cols := 0
+	for idx, r := range s {
+		w := runeCols(r)
+		if cols+w > maxCols {
+			if idx == 0 {
+				// Single wide rune in a 1-column slot: advance one rune to guarantee progress.
+				_, next := splitFirstRune(s)
+				return s[:len(s)-len(next)], next
+			}
 			return s[:idx], s[idx:]
 		}
-		count++
+		cols += w
 	}
 	return s, ""
 }
 
-func clipRunes(s string, max int) string {
+func splitFirstRune(s string) (rune, string) {
+	for _, r := range s {
+		rs := string(r)
+		return r, s[len(rs):]
+	}
+	return 0, ""
+}
+
+func clipCols(s string, max int) string {
 	if max <= 0 {
 		return ""
 	}
-	if runeWidth(s) <= max {
+	if displayWidth(s) <= max {
 		return s
 	}
 	if max <= 1 {
-		h, _ := splitAtRunes(s, max)
+		h, _ := splitAtCols(s, max)
 		return h
 	}
-	h, _ := splitAtRunes(s, max-1)
+	h, _ := splitAtCols(s, max-1)
 	return h + "."
 }
 
-func runeWidth(s string) int {
-	return utf8.RuneCountInString(s)
-}
-
-// shouldInteract gates UX-7's post-run key loop on both stdin and stdout being interactive TTYs and TERM != "dumb" (AGT-1).
+// shouldInteract gates UX-7's post-run key loop on foreground interactive stdin+stdout TTYs,
+// skipping under -o json, TERM=dumb, CI, or SANDPROBE_NO_KEYS (AGT-1).
 func shouldInteract(o opts) bool {
 	if o.json() || o.stdout != os.Stdout {
 		return false
@@ -754,7 +811,22 @@ func shouldInteract(o opts) bool {
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("TERM")), "dumb") {
 		return false
 	}
-	return isTerminal(os.Stdout) && isTerminal(os.Stdin)
+	if os.Getenv("CI") != "" || os.Getenv("SANDPROBE_NO_KEYS") != "" {
+		return false
+	}
+	if !isTerminal(os.Stdout) || !isTerminal(os.Stdin) {
+		return false
+	}
+	return isForegroundTTY(int(os.Stdin.Fd()))
+}
+
+func keyIdleDuration() time.Duration {
+	if raw := strings.TrimSpace(os.Getenv("SANDPROBE_KEY_IDLE_MS")); raw != "" {
+		if ms, err := strconv.Atoi(raw); err == nil && ms >= 50 && ms <= 600_000 {
+			return time.Duration(ms) * time.Millisecond
+		}
+	}
+	return defaultKeyIdleTimeout
 }
 
 type walkerItem struct {
@@ -823,13 +895,37 @@ func defaultWalkerHooks() walkerHooks {
 	}
 }
 
+// resolveReportPath resolves a written report path to a verified regular absolute path,
+// preventing a relative path beginning with "-" from being parsed as a flag by open or xdg-open.
+func resolveReportPath(path string) (string, error) {
+	if path == "" {
+		return "", errors.New("empty report path")
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	if !filepath.IsAbs(abs) || strings.HasPrefix(abs, "-") {
+		return "", errors.New("unsafe report path")
+	}
+	st, err := os.Stat(abs)
+	if err != nil || !st.Mode().IsRegular() {
+		return "", errors.New("report is not a regular file")
+	}
+	return abs, nil
+}
+
 func openBrowserFile(path string) error {
+	abs, err := resolveReportPath(path)
+	if err != nil {
+		return err
+	}
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
-		cmd = exec.Command("open", path)
+		cmd = exec.Command("open", abs)
 	default:
-		cmd = exec.Command("xdg-open", path)
+		cmd = exec.Command("xdg-open", abs)
 	}
 	return cmd.Start()
 }
@@ -863,13 +959,133 @@ func copyToClipboard(text string) error {
 	return fmt.Errorf("no clipboard utility available")
 }
 
+var errKeyIdleTimeout = errors.New("idle timeout")
+
+type fdKeyReader struct {
+	fd          int
+	initialIdle time.Duration
+	activeIdle  time.Duration
+	interacted  bool
+	sigCh       chan os.Signal
+	suspend     func()
+}
+
+func (r *fdKeyReader) Read(p []byte) (int, error) {
+	idle := r.initialIdle
+	if r.interacted && r.activeIdle > idle {
+		idle = r.activeIdle
+	}
+	deadline := time.Now().Add(idle)
+	for {
+		select {
+		case sig := <-r.sigCh:
+			if sig == syscall.SIGTSTP {
+				if r.suspend != nil {
+					r.suspend()
+				}
+				deadline = time.Now().Add(idle)
+				continue
+			}
+			if sig == syscall.SIGCONT {
+				deadline = time.Now().Add(idle)
+				continue
+			}
+			return 0, io.EOF
+		default:
+		}
+		rem := time.Until(deadline)
+		if rem <= 0 {
+			return 0, errKeyIdleTimeout
+		}
+		sliceMS := 100
+		if remMS := int(rem.Milliseconds()); remMS < sliceMS {
+			if remMS < 1 {
+				remMS = 1
+			}
+			sliceMS = remMS
+		}
+		ready, hup, err := pollFD(r.fd, sliceMS)
+		if err != nil {
+			if errors.Is(err, syscall.EINTR) {
+				continue
+			}
+			return 0, err
+		}
+		if ready {
+			n, rerr := syscall.Read(r.fd, p)
+			if n > 0 {
+				if p[0] == 0x1a { // Ctrl-Z in raw mode (ISIG off)
+					if r.suspend != nil {
+						r.suspend()
+					}
+					deadline = time.Now().Add(idle)
+					continue
+				}
+				r.interacted = true
+				return n, nil
+			}
+			if rerr != nil && errors.Is(rerr, syscall.EINTR) {
+				continue
+			}
+			return 0, io.EOF
+		}
+		if hup {
+			return 0, io.EOF
+		}
+	}
+}
+
 func interactResult(o opts, d report.Doc, base string, cleaned bool, caps termCaps) {
-	restore, err := makeRaw(int(os.Stdin.Fd()))
-	if err != nil {
+	fd := int(os.Stdin.Fd())
+	var mu sync.Mutex
+	var restore func()
+	enterRaw := func() error {
+		mu.Lock()
+		defer mu.Unlock()
+		if restore != nil {
+			return nil
+		}
+		fn, err := makeRaw(fd)
+		if err != nil {
+			return err
+		}
+		restore = fn
+		return nil
+	}
+	leaveRaw := func() {
+		mu.Lock()
+		fn := restore
+		restore = nil
+		mu.Unlock()
+		if fn != nil {
+			fn()
+		}
+	}
+
+	sigCh := make(chan os.Signal, 8)
+	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT, syscall.SIGQUIT, syscall.SIGTSTP, syscall.SIGCONT)
+	defer func() {
+		signal.Stop(sigCh)
+		leaveRaw()
+	}()
+	if err := enterRaw(); err != nil {
 		return
 	}
-	defer restore()
-	runKeyLoop(os.Stdin, o.stdout, d, base, cleaned, caps, defaultWalkerHooks())
+
+	reader := &fdKeyReader{
+		fd:          fd,
+		initialIdle: keyIdleDuration(),
+		activeIdle:  activeKeyIdleTimeout,
+		sigCh:       sigCh,
+		suspend: func() {
+			leaveRaw()
+			signal.Reset(syscall.SIGTSTP)
+			_ = syscall.Kill(syscall.Getpid(), syscall.SIGTSTP)
+			signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT, syscall.SIGQUIT, syscall.SIGTSTP, syscall.SIGCONT)
+			_ = enterRaw()
+		},
+	}
+	runKeyLoop(reader, o.stdout, d, base, cleaned, caps, defaultWalkerHooks())
 }
 
 func runKeyLoop(in io.Reader, out io.Writer, d report.Doc, base string, cleaned bool, caps termCaps, hooks walkerHooks) {
@@ -922,6 +1138,12 @@ func runKeyLoop(in io.Reader, out io.Writer, d report.Doc, base string, cleaned 
 	buf := make([]byte, 16)
 	for {
 		n, err := in.Read(buf)
+		if errors.Is(err, errKeyIdleTimeout) {
+			var sb strings.Builder
+			writeWrapped(&sb, "  ", "  ", "Idle timeout; exiting.", w, st.dim, st.reset)
+			_, _ = io.WriteString(out, sb.String())
+			return
+		}
 		if n == 0 || err != nil {
 			return
 		}
@@ -949,10 +1171,13 @@ func runKeyLoop(in io.Reader, out io.Writer, d report.Doc, base string, cleaned 
 		case "open":
 			var sb strings.Builder
 			if hooks.open != nil {
-				if err := hooks.open(htmlPath); err != nil {
+				absPath, rerr := resolveReportPath(htmlPath)
+				if rerr != nil {
 					writeWrapped(&sb, "  ", "  ", "Could not open browser; open "+printable(htmlPath), w, st.amber, st.reset)
+				} else if err := hooks.open(absPath); err != nil {
+					writeWrapped(&sb, "  ", "  ", "Could not open browser; open "+printable(absPath), w, st.amber, st.reset)
 				} else {
-					writeWrapped(&sb, "  ", "  ", "Opened "+printable(htmlPath), w, st.dim, st.reset)
+					writeWrapped(&sb, "  ", "  ", "Opened "+printable(absPath), w, st.dim, st.reset)
 				}
 			}
 			_, _ = io.WriteString(out, sb.String())

@@ -11,3 +11,11 @@ func makeRaw(fd int) (func(), error) {
 func termSize(fd int) (cols, rows int) {
 	return 0, 0
 }
+
+func isForegroundTTY(fd int) bool {
+	return false
+}
+
+func pollFD(fd int, timeoutMS int) (ready, hup bool, err error) {
+	return false, true, errors.New("poll unsupported on this platform")
+}
