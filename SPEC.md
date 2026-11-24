@@ -43,7 +43,7 @@ This bounded extension supersedes only the blanket exclusion of user-invoked off
 
 - **JON-1 Strict framing.** Protocol JSON is one bounded value, depth at most64, with no trailing data. Duplicate object member names, including case aliases which Go would map to the same field, are rejected before decoding. Case-distinct object names are conservatively rejected; arrays retain case-sensitive values. No raw malformed data/member names are echoed. Unknown-field rules on existing protocols remain strict. Preserve valid canonical existing messages and saved-run shapes.
 - **JON-2 Every boundary and tests.** Apply JON-1 to host observation parsing and every probe stdin mode, with the existing1MiB byte bound checked before parsing (not a truncated reader accepted as EOF). Reject unsupported/extra probe arguments. Add duplicate/alias/nesting/trailing/oversize/fuzz regressions. CI runs build/vet/unit tests on Linux without cloud/provider credentials; no live provider tests or new paid resources.
-- **ANL-1 Saved report input.** Offline analysis accepts only explicitly named report files opened with no-follow/nonblocking semantics and fstat-verified regular descriptors under an8MiB max+1 read bound and JON-1 framing. A supported schema, exactly the version its fields need (AGT-6), canonical known catalog IDs/results, unique checks, required grade/run/manifest fields and consistency between selected/skipped/check/unknown/completeness metadata are required. Missing/contradictory evidence is an error or incomplete, never a clean result. Fixed errors do not echo file contents. Negative results must be legal for their catalog kind and include exported proof metadata; grade counts/findings must agree with checks where derivable. The saved letter is reported and unverified, never an input to success/regression decisions. Analysis structurally validates exported reports, does not re-verify raw observations or canary receipts, and cannot authenticate or attest to an edited report. Every offline rendering of a saved report (`scorecard` in text, JSON and the page `-out` re-renders, `profile`, `assess`, `compare`) says so plainly: structurally checked only, its observations and receipts not re-verified, and an edited report can't be told apart.
+- **ANL-1 Saved report input.** Offline analysis accepts only explicitly named report files opened with no-follow/nonblocking semantics and fstat-verified regular descriptors under an8MiB max+1 read bound and JON-1 framing. A supported schema, exactly the version its fields need (AGT-6), canonical known catalog IDs/results, unique checks, required grade/run/manifest fields and consistency between selected/skipped/check/unknown/completeness metadata are required. Missing/contradictory evidence is an error or incomplete, never a clean result. Fixed errors do not echo file contents. Negative results must be legal for their catalog kind and include exported proof metadata; grade counts/findings must agree with checks where derivable. The saved letter is reported and unverified, never an input to success/regression decisions. Analysis structurally validates exported reports, does not re-verify raw observations or canary receipts, and cannot authenticate or attest to an edited report. Every offline rendering of a saved report (`scorecard` in text, JSON and the page `-out` re-renders, `profile`, `assess`, `compare`, `fix`) says so plainly: structurally checked only, its observations and receipts not re-verified, and an edited report can't be told apart.
 - **ANL-2 Coverage profile.** Five fixed areas are egress(EGR), secrets(SEC-1/2/3/5), privilege(AMP-1/2/3/8.sys/8.blk), persistence(PER), provider reach(SEC-4/AMP-4/5/6/7). SEC-3 stays aggregate secrets; no image/provider attribution is inferred. Each catalog check requires an explicit area mapping; an unmapped future check blocks offline analysis until classified. Counts distinguish findings, negative proofs, find-only no-finding, absent/out-of-scope, unknown, excluded and missing catalog coverage. No profile labels a wall secure/Held or changes the saved legacy letter/caps. Invalid reports have no assessed area. Terminal output escapes untrusted identifiers, including Unicode format controls (Cf), bidi overrides/isolates, zero-width format characters and BOM as visible code points; JSON labels reported data as unauthenticated and self-observed.
 - **CMP-1 Local comparison.** Compare two structurally validated reports by known check IDs/results/severities and declared scope/identity, never only the letter or prose heuristics. Flag new/worse findings and loss of coverage separately; removed/skipped/unknown checks cannot look like an improvement. Compare per-check scope/route, kind/evidence class, selected/skipped targets and recorded identity/config; unrecorded configuration remains unknown. Provider/mode/context differences are explicit; no-observed-change is conditional on matched coverage/context and means only the summarized fields, not equivalent security or an attestation. Ignore ephemeral runIDs/timestamps/nonces/receipt destinations when comparing observations. Keep invalid/incomplete inputs visible. Exit precedence is input/usage2, invalid/incomplete or unmatched context5, observed regression6, then assessed/no observed regression0. Automated gates must reject every nonzero exit and inspect both findings and context fields, rather than gate only on exit6. No network, file writes, schedules or notifications.
 - **CMP-2 Progress between two runs (24 November 2026).** A fix loop runs, applies fixes, runs again and compares, so `compare` also says what got better, without weakening CMP-1. From two valid reports (GRD-5) that ANL-1 accepts, check by check in catalog order:
@@ -2064,7 +2064,8 @@ Severity is that of a finding. Kind: 2 is two-sided, F is find-only. Evidence: P
   grader doesn't authenticate, so it never becomes host prose. Below the categories, when a chain or finding fired, the
   summary shows the top finding's exact sentence, severity and evidence class (KND-3): `proof` only for a proven finding
   that isn't a potential chain, and `a sign we saw, not confirmed` for anything else, a class the report doesn't name
-  included; then any canary receipt count and route summary from `d.Receipts`, and `Fix first`; then `Cleanup` (`✓` when
+  included; then any canary receipt count and route summary from `d.Receipts`, and `Fix first`, whose last line
+  is the fixed "Run sandprobe fix <report.json> for every fix, in order." (FIX-1); then `Cleanup` (`✓` when
   confirmed, or a loud `✗` warning when cleanup is unconfirmed, exit 7) and the HTML report path. An invalid run shows
   `SCORE none` and the escaped invalid reason, with no category rows or counts. Every string from the box, command line
   or saved report has all control characters, Unicode format characters (category `Cf`, including bidi
@@ -2136,6 +2137,7 @@ Severity is that of a finding. Kind: 2 is two-sided, F is find-only. Evidence: P
 | `sandprobe report <file>` | grades and renders a results file from `other` mode; unattested | no |
 | `sandprobe cleanup baseten -baseten-state <journal> [-y]` | verify and delete only a prior run's recorded Baseten incarnation (PRV-7); no canary | none without `-y`; otherwise verified deletion |
 | `sandprobe explain <check>` | what a check does, why it matters, its proof, its fix | no |
+| `sandprobe fix <report.json> [-provider <name>]` | a saved report's red checks as ranked actions, with a platform's proven snippet or general advice, and the rerun and compare steps (FIX-1 to FIX-8) | no |
 | `sandprobe guide` | the agent guide; `-install claude` writes a Claude Code skill, `-install codex` an AGENTS.md block | the skill or block only |
 | `sandprobe schema` | the JSON Schema for OUT-1 | no |
 | `sandprobe feedback bug\|feature\|idea` | shows a public issue for summationai/sandprobe, then files exactly that one with the person's consent (FBK-1, FBK-5) | an issue, only with `-confirm <code>` or a typed yes |
@@ -3023,6 +3025,111 @@ box or a machine holds.
   is always `[REDACTED]`. Exit codes: 0 when filed or when the link is printed; 2 for usage (`-y` included) or a
   refusal; 3 for a preview, a no, or a code that doesn't match; 5 when gh failed.
 
+## Fix loop, 24 November 2026
+
+So a run ends with changes a person, or their agent, can make to the sandbox's own config or code, and with the way to
+see whether each one worked: run, fix, rerun, compare. The catalog's fix sentences stay as they are: some can't be done
+on the provider at hand ("mount /proc/sys read-only" means nothing on Modal, which runs gVisor), so `fix` gives a
+platform's own setting only where a rerun proved it there, and labels everything else general advice.
+
+- **FIX-1 One saved report in, actions out.** `sandprobe fix <report.json> [-provider <name>] [-o json]` reads one
+  saved report under ANL-1's input rules. It makes no network call, writes no file and starts no process, so it never
+  creates, changes or contacts a box. It has its own flags. Like `scorecard`, `profile` and `compare`, every rendering
+  says the report was structurally checked only and not re-verified: ANL-1's saved-report note in text, and
+  `verification: "structural_only_unauthenticated"` with that note in JSON. An invalid run (GRD-5) has nothing to fix:
+  no actions, a fixed note, exit 5. Otherwise it exits 0, with or without actions; 2 is usage or a refused report.
+- **FIX-2 What fix acts on.** A check is red for `fix` when its result is a finding above Info (SCR-2's bar), or when
+  it is unknown only because the agent holds root's capabilities (TWN-4): the report's AMP-2 is a finding, and the
+  check's reason names TWN-4 and a `CAP_` capability. That reason is box text. `fix` uses it only as that yes or no,
+  never prints it, and it can only add such a check to the `run-as-user` action, which AMP-2's finding already offers;
+  it never adds or drops an action. Every other unknown, and every category red because nothing in it was tested, is
+  listed apart by check ID or category name with fixed text: as not decided by a setting, or, for Cloud access left
+  untested, as not an action for an agent (FIX-5).
+- **FIX-3 Actions.** `internal/fix` holds one table. Each action has an ID, a plain title, its trigger checks, and,
+  per platform, the snippet a rerun proved there (FIX-4). Every catalog check that can be red is the trigger of exactly
+  one action, and a test keeps it so. An action is offered only when one of its triggers is red, so a side effect
+  never offers one: running as non-root is offered only when AMP-2 is found, never for a readable `.env` on a box whose
+  agent isn't root. An offered action addresses its red triggers; with a proven snippet, also the red checks that
+  snippet's rerun cleared there; and `run-as-user` also the TWN-4 unknowns. A check that an offered proven snippet
+  addresses is not repeated as general advice under another action. Each action in the output has its ID, title, the
+  check IDs it addresses (findings and unknowns apart), the categories that could turn green, and either the proven
+  snippet with its known costs and where it was proven, or the catalog's fix sentence for each of its checks
+  (`catalog.Guide`), labelled "General advice, not proven on this platform". A proven action whose triggers include a
+  check its snippet wasn't proven to clear gives that check's general advice too.
+- **FIX-4 Proven snippets only.** The platform is the report's run provider when it is in FBK-1's fixed list
+  (`docker`, the shipped recipes such as `kubernetes`, and the native providers); for a `run exec` report, `-provider`
+  names it from the same list, and without it the platform is unknown. `-provider` on any other report is a usage
+  error, as is a name outside the list. It is the person's own declaration: an agent passes it only when its person
+  names the platform, never by inference. Snippets exist for two platforms, each from a rerun:
+  - **Modal**, from three `run exec` rounds on one throwaway sandbox per round (python:3.12-slim-bookworm, commands
+    through the SDK's `Sandbox.exec`), 24 November 2026. Round 0, Modal's defaults (root, network open): 0/6. Round 1,
+    `run-as-user` and `block-network`: 3/6. Round 2, plus `clean-env` and `protect-home`: 4/6. `run-as-user`: in the
+    image `useradd -m -u 1000 -s /bin/bash agent`, and the agent's commands through `setpriv --reuid=1000
+    --regid=1000 --init-groups --inh-caps=-all --ambient-caps=-all --no-new-privs <cmd>`; it cleared AMP-2, SEC-3,
+    SEC-5, PER-2 and AMP-8.sys, and the TWN-4 unknowns AMP-1, AMP-4 and AMP-8.blk. `block-network`:
+    `modal.Sandbox.create(..., block_network=True)`; it cleared EGR-1, EGR-2, EGR-5.22, EGR-5.80, EGR-5.8080 and
+    EGR-5.53u. `clean-env`: `setpriv ... --reset-env <cmd>`; it cleared SEC-1. `protect-home`: in the image `chown -R
+    root:root /home/agent; chmod 0755 /home/agent; mkdir -p /work; chown agent:agent /work`, and `workdir="/work"` on
+    exec; it cleared PER-1, PER-3 and PER-4. The last two were proven with `run-as-user` in place, so when both are
+    offered they come after it. A round changed two things at once; each check is credited to the change whose
+    mechanism reaches it (users and files, or the network, or the environment). SEC-2 stayed found in every round
+    and AMP-3 was never found, so no Modal snippet claims either.
+  - **Docker**, from FIX-9's fixture test, each action alone from a baseline where its triggers are red:
+    `run-as-user` `--user 1000:1000 --cap-drop ALL` (AMP-2, SEC-3, PER-2, and the TWN-4 unknowns of a root agent
+    holding `CAP_SYS_PTRACE`); `no-new-privileges` `--security-opt no-new-privileges` (AMP-3); `block-network`
+    `--network none` (EGR-1, EGR-2, each EGR-5 port); `protect-home` `--read-only --tmpfs /tmp` (PER-1 to PER-4, even
+    as root); `isolate-processes` `--user` set to a user other than the agent's for the container's own processes, with
+    the agent through `docker exec -u` (`-as` in `run docker`) (SEC-2, SEC-5); and `clean-env`, the image without the
+    `ENV` line that held the key (SEC-1). Unsetting a variable with `-e NAME` is never offered: on a host that exports
+    NAME, it passes the host's own value into the box.
+  Every other action and platform gets general advice.
+- **FIX-5 Costs and limits.** Each snippet carries its known costs as fixed text. `block-network` cuts the agent off
+  from its model API too, on Modal and on Docker. DNS (EGR-1) and UDP 53 (EGR-5.53u) then have no receipt, which isn't
+  proof (KND-2), so Exfiltration's row turns green with a "not proven: DNS, UDP 53" line. On Modal it is the only
+  egress setting proven; `fix` makes no claim about Modal's domain or CIDR allowlists, which this loop didn't test.
+  `protect-home` on Docker makes the whole root read-only: the agent writes only to `/tmp` and to what is mounted for
+  it. Cloud access red because SEC-4 and AMP-7 were skipped (PRV-15's and RCP-4's defaults) is never an action and
+  names no flag: `fix` lists it under "Not an action for an agent", saying it wasn't tested because its checks contact
+  the provider's own endpoints, outside Sandprobe's reviewed scope for this run, and that only the person decides
+  whether they are tested. `fix` never suggests `-provider`, `-provider-endpoints` or a provider name, anywhere: an
+  agent never infers, adds or changes the provider to clear a red; only the person declares it. A category red because
+  the run had no canary (HCN-5) says to rerun with one.
+- **FIX-6 Ranking.** An action could turn a category green when that category is red on the report's scorecard
+  (SCR-2) and every check that holds it red, each finding above Info and each unknown, is among the action's
+  addressed checks, together with those of an action it comes after (FIX-4) when that one is offered too. A category
+  red because nothing in it was tested never turns green from an action. Actions that could turn at least one
+  category green come first; then more checks addressed; then more categories; then table order. An action proven
+  only with another in place is moved to just after it.
+- **FIX-7 The loop.** The output ends with the next steps for the report's run mode, as templates: apply the top
+  action, with the person's OK; rerun into a new folder; compare; run `fix` again. For `run docker`: `sandprobe run
+  docker <image> -as <user> -y -out <next-folder> -- <your docker run options, with the fix>`. For `run exec`:
+  `sandprobe run exec -as <user> -y -out <next-folder> -- <your command>`. For a recipe:
+  `sandprobe run <recipe> -as <user> -y -out <next-folder>`; for a native provider: `sandprobe run <provider> -y -out
+  <next-folder>`, each name from the fixed list; for any other report: `sandprobe run <the way you ran it> -y -out
+  <next-folder>`. Then `sandprobe compare
+  <report.json> <next-folder>/*.json` and `sandprobe fix <next-folder>/*.json` with the same flags as before. The image, user, command and docker
+  options stay placeholders: the report doesn't keep the person's command, and what it does keep is untrusted
+  (FIX-8).
+- **FIX-8 Predictions, built from fixed text only.** Each action says its checks "should clear; a rerun proves it".
+  `fix` never marks a check fixed, never edits a report, and its JSON has no pass or fixed field: only a rerun and
+  `compare` show what changed. Its text and JSON (`schema: "sandprobe.fix/1"`) are built only from catalog check IDs,
+  the catalog's and SCR-1's fixed text, the action table and fixed sentences:
+  never from a string the report holds (a box name, evidence, a reason, a finding's text or fix, a provider ID, a
+  path), as SCR-3 requires of the scorecard. The report's provider becomes a platform only by matching the fixed list;
+  anything else is "unknown". Text output wraps at 80 columns (UX-9).
+- **FIX-9 The Docker proof.** With `SANDPROBE_FIXTURES=1` and local Docker only, a test builds a weak image like the
+  demo's (debian, an `agent` user with a writable home, a secret-shaped `ENV`, run as root on the default network) and
+  three variants: without the `ENV` (clean-env's image change), with a long-running process of its own started by
+  `--entrypoint`, and both. It runs `run docker` and `fix -o json` from four baselines, and reruns with one action's
+  options added: from the root box, every offered Docker action alone; from the agent's own user, `protect-home`;
+  from a root agent holding `CAP_SYS_PTRACE`, `run-as-user`, which must take TWN-4 unknowns; and from the image's own
+  process running as the agent's uid, `isolate-processes`. Each time it asserts that every check the action addressed
+  was red and is no longer, and that every category it said could turn green is green; and, over all of them, that
+  every check the table claims for Docker was shown red, then cleared. It then runs the loop, top action first, until
+  `fix` offers nothing, from the bare box and from the one whose own process runs, and asserts each ends at a full
+  score that never fell on the way. Each run's own teardown removes its container, canary and network by ID; the test
+  removes only the image tags it built.
+
 ## Tests
 
 Every test here runs on public data. Tests that need a saved report use `demo/reports` and `test/reports`, which
@@ -3031,6 +3138,8 @@ provider runs stay with the operators' records (AGENTS rule 9), not in this repo
 
 | Extension rule | Tests |
 | --- | --- |
+| FIX-1 to FIX-8 | `internal/fix/fix_test.go`: every red-capable catalog check is the trigger of exactly one action and every Docker and Modal claim is a catalog check; the Modal rounds, built in memory, rank `run-as-user` then `block-network` on round 0 and `protect-home` first on round 1, with no Modal action claiming SEC-2 or AMP-3; `run-as-user` is never offered without AMP-2's finding (`demo/reports/vibe.json`, `regressed.json`); a TWN-4 unknown joins only `run-as-user`; general advice is the catalog's sentence, never the report's; Cloud access skipped by default is "not an action for an agent", never an action, and no output names `-provider`, `-provider-endpoints` or "terms"; a report whose every string carries ESC, bidi, newline and shell payloads gives text and JSON with none of them. `cmd/sandprobe/fix_test.go`: flags, `-provider` only on `run exec` reports and only from the list, exit codes (5 for an invalid run as an invalid run writes it), the saved-report note, 80 columns, a hostile `run.provider` |
+| FIX-9 | `cmd/sandprobe/fix_docker_test.go` `TestFixLoopDocker`, with `SANDPROBE_FIXTURES=1` |
 | FBK-1 to FBK-7 | `cmd/sandprobe/feedback_test.go`, with `PATH` pinned in every test to a directory holding a fake `gh` that records the full arguments, standard input and `GH_HOST`/`GH_REPO` of every call, or holding none, so no test can reach GitHub: `TestFeedbackKinds` (each kind's prefix, label, form and main field, through gh and through the link, once confirmed), `TestFeedbackRefusesCredentials` (one refusal per FBK-4 pattern, home paths included, each naming the place and the pattern and never printing the matched text, in text and in `-o json`, with nothing sent and gh never run; ordinary text and placeholders pass, one key a line; a list after a key on its line is refused by design), `TestFeedbackPassesOwnOutput` (every check's `explain`, and `scorecard`, `profile` and `assess` of every saved report in text and JSON, and `compare`, pass the scan; `secrets: x`, `SECRETS=`, longer names and an altered own line don't), `TestFeedbackRefusesShortCredentials` (the security reviews of #65: short values in every header, Bearer, Basic, URL, YAML, INI, JSON, environment, flag and prefixed-token form; every Slack prefix; a URL with an empty user; `DB_PASS` and `MYSQL_PWD`; a YAML or JSON value on the next line, a second continuation line, a continuation after a placeholder, a block scalar, an explicit key, a folded `Authorization` header, and credentials found only by the YAML and JSON walks of a fenced block or the whole body, an escaped key among them; round 3's shell-joined values (`"<redacted>"x` in field, header, flag, Bearer and continuation form, and a placeholder followed by more words), round 5's double-quote backslashes (`"tr\ue"` in Bearer, header, field and flag form, and `"\$TOKEN"`, whose raw form isn't a placeholder), each leaking without the fix; round 5's backticks after an escaped one (`` note \` token: <redacted>`x ``, its Bearer form, a double-escaped `\\`, and a quoted value before the backtick), each leaking without the fix, and a backtick inside quotes; round 4's unmatched backticks and closing punctuation (`Bearer <redacted>` then a stray backtick, and `'true)'` in Bearer, flag, header and field form), and its comma and semicolon lists (`TOKEN=<redacted>,x`, `export TOKEN=<redacted>,x`, `TOKEN=<redacted>;x`, `Authorization: Token <redacted>,x`, `--token=<redacted>,x`, a YAML scalar or flow sequence with a comma, and a continuation line), each but the flow sequence leaking without the fix, escaped and HTML-referenced names in prose, a YAML alias key inside a fence nested in a longer one, the same in a seventeenth YAML document, and a repeated, escaped JSON key with its colon on another line; through gh and through the link, in text and in `-o json`, with and without a `-confirm` code: each is refused, the value appears in no output, gh is never run, and no link or file is made), `TestFeedbackWalkLimits` (JSON nested past 10,000 behind a split colon that YAML can't read, and fences nested past 16, refuse and name the limit; `walkJSON` alone reads exactly 10,000 containers, with or without a value inside, and refuses one more, an unclosed run, and Codex's round 4 body, but not prose or a short cut-off document; a repeated JSON key can't hide the first one's value), `TestFeedbackPromptGatePTY` (over a real PTY: a foreground terminal asks and takes only `yes`; a background process group, a PTY that isn't the session's controlling terminal, `CI`, `TERM=dumb` and `SANDPROBE_NO_KEYS` never ask and never block), `TestFeedbackReportSummary` (a saved report made hostile in the test, with credentials, home paths, variable names and a box name in every free-text field and as its provider, still passes ANL-1; none of them reaches the preview, gh's arguments, its standard input or the link; an edited report gets ANL-1's fixed error), `TestFeedbackTransport` (the exact arguments of the graphql query and of `issue create`, unchanged with `GH_HOST` and `GH_REPO` set; the body on standard input; the label only for an account that can triage; gh absent or not signed in gives the link once confirmed; gh failing or printing no issue URL exits 5 with the link), `TestFeedbackLink` (percent-encoding, the 8,000-character limit, and the body written to a private file when it is longer), `TestFeedbackJSON` (one document with FBK-7's fields; `public` and, through gh, `account`; a login not in GitHub's form means no gh), `TestFeedbackConsent` (a preview prints the code, exits 3, makes no link and never runs `issue create`; the matching code files exactly the previewed title, labels and body; an edited body, another account, gh signed in after a link preview, or a wrong code is refused with `feedback.changed` and nothing filed or linked; `-o json` doesn't change the code; `-y` is a usage error; the terminal prompt accepts only `yes`, and no `/dev/tty` means no filing), `TestFeedbackUsage` (a bad kind, title, body, `-provider` or `-confirm`) |
 | REL-1 to REL-3 | `.github/workflows/release.yml` on every pull request: REL-1 twice on separate runners, compared file by file, publishing nothing, and `.github/release-version_test.sh` (REL-2's version grammar: `x.y.z` publishes as a full release, `x.y.z-rc.N` as a pre-release never marked Latest, and everything else is refused, a leading `v`, another suffix, a missing part, a second line and an empty version among them); on a release, the version check before anything is published, then the attestation |
 | QCK-1/QCK-2 | Linux quick metadata/no-follow FIFO/symlink tests, status/error/name bounds tests, static amd64/arm64 packaging checksums |
