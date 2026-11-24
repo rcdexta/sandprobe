@@ -608,6 +608,7 @@ func renderResult(d report.Doc, base string, cleaned bool, caps termCaps) string
 		}
 		if fix != "" {
 			writeWrapped(&b, "  Fix first: ", "             ", fix, w, "", "")
+			writeWrapped(&b, "             ", "             ", fixLoopLine, w, "", "") // FIX-1, UX-6
 		}
 	case !d.Grade.Complete && len(d.Grade.Unknown) > 0:
 		ids := make([]string, 0, len(d.Grade.Unknown))

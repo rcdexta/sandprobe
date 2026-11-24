@@ -120,6 +120,7 @@ func TestResultStatesAndWidth(t *testing.T) {
 				"CHAIN CHN-1 · CRITICAL",
 				"Canary receipts: 6",
 				"Fix first:",
+				"Run sandprobe fix <report.json>", // FIX-1, UX-6
 				"✓ Cleanup",
 			},
 		},

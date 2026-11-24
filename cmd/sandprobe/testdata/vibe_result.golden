@@ -20,6 +20,7 @@
   Canary receipts: 6 (dns/53, tcp/443, tcp/22, tcp/80, tcp/8080, udp/53)
   Fix first: Fix either side: cut the way out, or close the readable surface.
              Both is better. (+15 more findings in report)
+             Run sandprobe fix <report.json> for every fix, in order.
 
   ✓ Cleanup  deleted: the container, the canary and the network, each confirmed
              gone by its ID

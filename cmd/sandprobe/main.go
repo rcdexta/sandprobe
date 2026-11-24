@@ -87,6 +87,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if cmd == "feedback" { // FBK-1: its own flags
 		return feedback(rest, os.Stdin, feedbackTTY(stdout), stdout, stderr)
 	}
+	if cmd == "fix" { // FIX-1: its own flags
+		return fixCmd(rest, stdout, stderr)
+	}
 	var passthrough []string // PRV-14: docker run options, after "--", passed through unchanged
 	for i, a := range rest {
 		if a == "--" {
@@ -242,6 +245,9 @@ const usage = `sandprobe scores how well an AI agent's sandbox contains it acros
   sandprobe assess <report.json> canary-egress-deny-v1  retrospective six-route assessment (offline)
   sandprobe compare <a> <b>        compare saved findings/coverage (offline)
   sandprobe explain <check>        what a check does, what a finding means, and its fix
+  sandprobe fix <report.json> [-provider <name>]
+                                   a saved report's fixes, ranked, with each platform's proven settings and the
+                                   rerun and compare steps; -provider names the platform of a run exec report (offline)
   sandprobe feedback bug|feature|idea -title <one line> -body-file <file or -> [-report <report.json>]
                                    preview a public issue for summationai/sandprobe and get its code; then, only with
                                    your person's yes, the same command with -confirm <code> files exactly that (FBK-5)
