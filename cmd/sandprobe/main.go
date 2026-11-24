@@ -245,9 +245,9 @@ const usage = `sandprobe scores how well an AI agent's sandbox contains it acros
   sandprobe assess <report.json> canary-egress-deny-v1  retrospective six-route assessment (offline)
   sandprobe compare <a> <b>        compare saved findings/coverage (offline)
   sandprobe explain <check>        what a check does, what a finding means, and its fix
-  sandprobe fix <report.json> [-provider <name>]
+  sandprobe fix <report.json> [-platform <name>]
                                    a saved report's fixes, ranked, with each platform's proven settings and the
-                                   rerun and compare steps; -provider names the platform of a run exec report (offline)
+                                   rerun and compare steps; -platform names a run exec report's platform (offline)
   sandprobe feedback bug|feature|idea -title <one line> -body-file <file or -> [-report <report.json>]
                                    preview a public issue for summationai/sandprobe and get its code; then, only with
                                    your person's yes, the same command with -confirm <code> files exactly that (FBK-5)

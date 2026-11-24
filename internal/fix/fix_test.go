@@ -2,6 +2,7 @@ package fix
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -96,8 +97,17 @@ func doc(results map[string]string) report.Doc {
 		}
 		d.Checks = append(d.Checks, c)
 	}
+	// The identity as the Modal rounds saw it: root with Modal's default capability sets when AMP-2 is found, an
+	// unprivileged user with none otherwise.
+	none := "0000000000000000"
+	d.Identity = &obs.Identity{UID: 1000, GID: 1000, CapEff: none, CapPrm: none, CapInh: none, CapBnd: rootCaps, CapAmb: none}
+	if r := results["AMP-2"]; r != "" && !strings.HasPrefix(r, "unknown") {
+		d.Identity = &obs.Identity{CapEff: rootCaps, CapPrm: rootCaps, CapInh: "00000000a80405fb", CapBnd: rootCaps, CapAmb: rootCaps}
+	}
 	return d
 }
+
+const rootCaps = "00000000a80c05fb" // Modal's defaults for root, CAP_SYS_PTRACE among them
 
 const twn4 = "unknown:nothing was found, but the agent holds CAP_SYS_PTRACE, which reaches past file permissions and mounts altogether, so no refusal, absence or empty listing shows anything (TWN-4)"
 
@@ -130,33 +140,38 @@ func action(p Plan, id string) (Action, bool) {
 	return p.Actions[i], true
 }
 
-// FIX-3, FIX-4, FIX-6: the Modal loop's own rounds rank as the loop ran them.
+// FIX-3, FIX-4, FIX-6: the Modal rounds rank from their direct checks; every red check keeps its own action, and a
+// snippet's side effects sit apart, uncounted.
 func TestModalRounds(t *testing.T) {
 	if s := report.Score(doc(modalR0)); s.Score != 0 || report.Score(doc(modalR1)).Score != 3 || report.Score(doc(modalR2)).Score != 4 {
 		t.Fatalf("the in-memory rounds don't score 0, 3 and 4: %d", s.Score)
 	}
 	p := Build(doc(modalR0), "exec", "modal")
-	want := []string{"run-as-user", "block-network", "protect-home", "clean-env", "isolate-processes"}
+	want := []string{"block-network", "run-as-user", "protect-home", "isolate-processes", "clean-env", "remove-credential-files", "close-host-access"}
 	if !slices.Equal(ids(p), want) {
 		t.Fatalf("round 0: %v, want %v", ids(p), want)
 	}
 	ru, _ := action(p, "run-as-user")
-	if !ru.Proven || !slices.Equal(ru.Unknowns, []string{"AMP-1", "AMP-4", "AMP-8.blk"}) ||
-		!slices.Equal(ru.CouldTurnGreen, []string{"Containment", "Privilege"}) || !slices.Contains(ru.Findings, "AMP-8.sys") {
+	if !ru.Proven || !slices.Equal(ru.Findings, []string{"AMP-2"}) || !slices.Equal(ru.Unknowns, []string{"AMP-1", "AMP-4", "AMP-8.blk"}) ||
+		!slices.Equal(ru.MayAlsoClear, []string{"SEC-3", "SEC-5", "PER-2", "AMP-8.sys"}) || !slices.Equal(ru.CouldTurnGreen, []string{"Privilege"}) {
 		t.Errorf("round 0 run-as-user: %+v", ru)
 	}
+	// The Modal siblings of SEC-3's case: each side effect keeps its own action, with its own general advice.
+	for id, own := range map[string]string{"SEC-3": "remove-credential-files", "SEC-5": "isolate-processes", "PER-2": "protect-home", "AMP-8.sys": "close-host-access"} {
+		a, ok := action(p, own)
+		if !ok || !slices.Contains(a.Findings, id) || !slices.ContainsFunc(a.General, func(g Advice) bool { return slices.Contains(g.Checks, id) && g.Text == catalog.Guide[id].Fix }) {
+			t.Errorf("round 0: %s lost its own action %s: %+v", id, own, a)
+		}
+	}
 	ph, _ := action(p, "protect-home")
-	if ph.After != "run-as-user" || !slices.Equal(ph.CouldTurnGreen, []string{"Persistence"}) || slices.Contains(ph.Findings, "PER-2") {
+	if ph.After != "run-as-user" || !slices.Equal(ph.CouldTurnGreen, []string{"Persistence"}) || !slices.Equal(ph.Findings, []string{"PER-1", "PER-2", "PER-3", "PER-4"}) {
 		t.Errorf("round 0 protect-home: %+v", ph)
 	}
 	ip, _ := action(p, "isolate-processes")
-	if ip.Proven || !slices.Equal(ip.Findings, []string{"SEC-2"}) || len(ip.General) != 1 || ip.General[0].Text != catalog.Guide["SEC-2"].Fix {
+	if ip.Proven || !slices.Equal(ip.Findings, []string{"SEC-2", "SEC-5"}) || len(ip.General) != 2 || ip.General[0].Text != catalog.Guide["SEC-2"].Fix {
 		t.Errorf("round 0 isolate-processes: %+v", ip)
 	}
-	for _, a := range p.Actions { // FIX-3: what run-as-user proved on Modal isn't repeated as general advice
-		if a.ID == "close-host-access" || a.ID == "remove-credential-files" {
-			t.Errorf("round 0 repeats %s as general advice", a.ID)
-		}
+	for _, a := range p.Actions {
 		if !strings.Contains(a.Prediction, "a rerun proves it") {
 			t.Errorf("%s: %q isn't a prediction", a.ID, a.Prediction)
 		}
@@ -175,6 +190,42 @@ func TestModalRounds(t *testing.T) {
 	}
 }
 
+// FIX-3: a root box whose SEC-3 is red, a credential in the agent's home as well as /etc/shadow, keeps
+// remove-credential-files beside run-as-user, ranked as it would be without run-as-user's side effect.
+func TestSideEffectNeverHidesAnAction(t *testing.T) {
+	results := map[string]string{"AMP-2": "critical", "AMP-3": "medium", "SEC-3": "high", "PER-2": "low"}
+	d := doc(results)
+	for i := range d.Checks {
+		if d.Checks[i].ID == "SEC-3" {
+			d.Checks[i].Evidence = "the agent can open /etc/shadow and ~/.env (nothing was read)"
+		}
+	}
+	p := Build(d, "docker", "docker")
+	ru, _ := action(p, "run-as-user")
+	rc, ok := action(p, "remove-credential-files")
+	if !ok || !slices.Equal(rc.Findings, []string{"SEC-3"}) || rc.General[0].Text != catalog.Guide["SEC-3"].Fix {
+		t.Fatalf("remove-credential-files: %+v in %v", rc, ids(p))
+	}
+	if !slices.Equal(ru.MayAlsoClear, []string{"SEC-3", "PER-2"}) || slices.Contains(ru.Findings, "SEC-3") || len(ru.CouldTurnGreen) != 0 {
+		t.Errorf("run-as-user: %+v", ru)
+	}
+	if ph, ok := action(p, "protect-home"); !ok || !slices.Equal(ph.Findings, []string{"PER-2"}) {
+		t.Errorf("protect-home: %+v", ph)
+	}
+	// Without run-as-user's snippet at all (an unknown platform), the same actions rank the same way.
+	q := Build(d, "docker", "")
+	strip := func(p Plan) []string {
+		var out []string
+		for _, a := range p.Actions {
+			out = append(out, fmt.Sprintf("%s %v %v %v", a.ID, a.Findings, a.Unknowns, a.CouldTurnGreen))
+		}
+		return out
+	}
+	if !slices.Equal(strip(p), strip(q)) {
+		t.Errorf("a side effect moved an action:\n%v\n%v", strip(p), strip(q))
+	}
+}
+
 // FIX-5: Cloud access left untested is never an action and names no flag, provider name or terms, whatever the
 // platform; nothing else in the output does either.
 func TestCloudIsNotAnAction(t *testing.T) {
@@ -187,7 +238,7 @@ func TestCloudIsNotAnAction(t *testing.T) {
 			t.Errorf("%v: an action for untested Cloud access", tc)
 		}
 		b, _ := json.Marshal(p)
-		for _, banned := range []string{"-provider", "terms", "modal", "Modal"} {
+		for _, banned := range []string{"-provider", "-platform", "terms", "modal", "Modal"} {
 			if banned == "modal" || banned == "Modal" {
 				if tc.platform == "modal" {
 					continue // the snippets say where they were proven
@@ -221,11 +272,19 @@ func TestRunAsUserOnlyForRoot(t *testing.T) {
 	}
 }
 
-// FIX-2: a TWN-4 unknown joins only run-as-user, and only beside AMP-2's finding; any other unknown is not decided by
-// a setting.
-func TestTWN4UnknownsJoinRunAsUser(t *testing.T) {
-	r := map[string]string{"AMP-2": "critical", "AMP-4": twn4, "SEC-5": "unknown:the call failed"}
-	p := Build(doc(r), "exec", "")
+// FIX-2: an unknown joins run-as-user only beside AMP-2's finding and a capability TWN-4 names for its mechanism, from
+// the identity's capability sets; any other unknown is not decided by a setting.
+func TestCapabilityUnknownsJoinRunAsUser(t *testing.T) {
+	for _, m := range catalog.Checks {
+		if _, ok := powers[m.Mechanism]; !ok {
+			t.Errorf("%s: mechanism %q has no TWN-4 powers", m.ID, m.Mechanism)
+		}
+	}
+	// CAP_FOWNER defeats a write refusal, never a refusal to open another process's files.
+	d := doc(map[string]string{"AMP-2": "high", "AMP-4": "unknown:the call failed", "SEC-5": "unknown:the call failed"})
+	fowner := "0000000000000008"
+	d.Identity = &obs.Identity{UID: 1000, GID: 1000, CapEff: fowner, CapPrm: fowner, CapInh: fowner, CapBnd: rootCaps, CapAmb: "0000000000000000"}
+	p := Build(d, "exec", "")
 	ru, ok := action(p, "run-as-user")
 	if !ok || !slices.Equal(ru.Unknowns, []string{"AMP-4"}) || ru.Proven || len(ru.General) != 1 {
 		t.Fatalf("run-as-user: %+v", ru)
@@ -242,10 +301,43 @@ func TestTWN4UnknownsJoinRunAsUser(t *testing.T) {
 		slices.ContainsFunc(p.NotDecided, func(it Item) bool { return it.Check == "AMP-4" }) {
 		t.Errorf("not decided: %+v", p.NotDecided)
 	}
-	// Without AMP-2's finding, the same reason decides nothing, and nothing is offered for it.
-	p = Build(doc(map[string]string{"AMP-4": twn4}), "exec", "")
-	if len(p.Actions) != 0 || !slices.ContainsFunc(p.NotDecided, func(it Item) bool { return it.Check == "AMP-4" }) {
-		t.Errorf("without AMP-2: %v %+v", ids(p), p.NotDecided)
+	// Without AMP-2's finding, a missing identity, or a set that doesn't parse, nothing is decided from capabilities.
+	for name, change := range map[string]func(*report.Doc){
+		"no AMP-2": func(d *report.Doc) {
+			d.Checks[slices.IndexFunc(d.Checks, func(c report.Check) bool { return c.ID == "AMP-2" })].Result = obs.Pass
+		},
+		"no identity": func(d *report.Doc) { d.Identity = nil },
+		"bad set":     func(d *report.Doc) { d.Identity.CapAmb = "not hex" },
+	} {
+		d := doc(map[string]string{"AMP-2": "critical", "AMP-4": "unknown:the call failed"})
+		change(&d)
+		p := Build(d, "exec", "")
+		if ru, ok := action(p, "run-as-user"); ok && len(ru.Unknowns) > 0 || !slices.ContainsFunc(p.NotDecided, func(it Item) bool { return it.Check == "AMP-4" }) {
+			t.Errorf("%s: AMP-4 decided from capabilities: %v %+v", name, ids(p), p.NotDecided)
+		}
+	}
+}
+
+// FIX-2: a report's reasons can't move anything. One whose reasons claim TWN-4 and a capability, and one whose
+// reasons say nothing, rank and read the same, whatever the identity holds.
+func TestLyingReasonsChangeNothing(t *testing.T) {
+	for name, results := range map[string]map[string]string{
+		"root":         {"AMP-2": "critical", "AMP-4": "unknown:x", "SEC-3": "unknown:x", "EGR-2": "medium"},
+		"no AMP-2":     {"AMP-4": "unknown:x", "SEC-3": "unknown:x", "EGR-2": "medium"},
+		"unprivileged": {"AMP-3": "medium", "AMP-4": "unknown:x", "PER-1": "low"},
+	} {
+		plain, lying := doc(results), doc(results)
+		for i := range lying.Checks {
+			if lying.Checks[i].Result == obs.Unknown {
+				lying.Checks[i].Reason = strings.TrimPrefix(twn4, "unknown:")
+				lying.Checks[i].Evidence = "the agent holds CAP_SYS_ADMIN (TWN-4)"
+			}
+		}
+		a, _ := json.Marshal(Build(plain, "exec", "modal"))
+		b, _ := json.Marshal(Build(lying, "exec", "modal"))
+		if string(a) != string(b) {
+			t.Errorf("%s: lying reasons changed the plan:\n%s\n%s", name, a, b)
+		}
 	}
 }
 

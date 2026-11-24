@@ -7,7 +7,7 @@ package fix
 import (
 	"slices"
 	"sort"
-	"strings"
+	"strconv"
 
 	"sandprobe/internal/catalog"
 	"sandprobe/internal/obs"
@@ -21,6 +21,18 @@ const Schema = "sandprobe.fix/1"
 // Prediction is FIX-8's wording: a fix is a prediction until a rerun shows it.
 const Prediction = "should clear; a rerun proves it"
 
+// SideEffect is FIX-3's wording for a check a snippet's rerun also cleared, beyond its triggers.
+const SideEffect = "A side effect seen on another box, not counted here: this may also clear it; a rerun proves it. " +
+	"Each keeps its own action."
+
+// IncompleteLine is FIX-1's fixed warning for an incomplete report.
+func IncompleteLine(n int) string {
+	if n == 1 {
+		return "This report is incomplete: 1 check unknown; a rerun may change the plan."
+	}
+	return "This report is incomplete: " + strconv.Itoa(n) + " checks unknown; a rerun may change the plan."
+}
+
 // GeneralAdvice labels the catalog's own fix sentences where no rerun proved a setting on this platform (FIX-3).
 const GeneralAdvice = "General advice, not proven on this platform"
 
@@ -30,6 +42,8 @@ type Plan struct {
 	Verification string   `json:"verification"` // ANL-1: a saved report is never re-verified
 	Note         string   `json:"note"`
 	Valid        bool     `json:"valid"`
+	Complete     bool     `json:"complete"` // FIX-1: an incomplete report keeps its plan, and says so
+	Unknown      []string `json:"unknown"`  // the grade's unknown check IDs
 	Platform     string   `json:"platform"` // from the fixed list, or "unknown"
 	Score        int      `json:"score"`
 	Of           int      `json:"of"`
@@ -45,11 +59,12 @@ type Action struct {
 	Rank           int      `json:"rank"`
 	ID             string   `json:"id"`
 	Title          string   `json:"title"`
-	Findings       []string `json:"findings,omitempty"` // found checks it addresses
-	Unknowns       []string `json:"unknowns,omitempty"` // TWN-4 unknowns it addresses
-	CouldTurnGreen []string `json:"could_turn_green"`   // categories, with After's checks when that one is offered too
-	After          string   `json:"after,omitempty"`    // proven with this action in place, and offered here
-	Proven         bool     `json:"proven"`
+	Findings       []string `json:"findings,omitempty"`       // its red triggers
+	Unknowns       []string `json:"unknowns,omitempty"`       // FIX-2's capability unknowns (run-as-user)
+	MayAlsoClear   []string `json:"may_also_clear,omitempty"` // FIX-3: side effects; never rank, greens or another's action
+	CouldTurnGreen []string `json:"could_turn_green"`         // categories, with After's checks when that one is offered too
+	After          string   `json:"after,omitempty"`          // proven with this action in place, and offered here
+	Proven         bool     `json:"platform_tested"`          // a rerun tested its snippet on this platform (FIX-3)
 	Apply          []string `json:"apply,omitempty"`
 	Proof          string   `json:"proof,omitempty"`
 	Costs          []string `json:"costs,omitempty"`
@@ -75,12 +90,18 @@ type Item struct {
 // from the caller's fixed list, never straight from the report.
 func Build(d report.Doc, runProvider, platform string) Plan {
 	p := Plan{Schema: Schema, Verification: "structural_only_unauthenticated", Note: report.SavedNote,
-		Platform: platform, Actions: []Action{}}
+		Platform: platform, Actions: []Action{}, Unknown: []string{}}
 	if platform == "" {
 		p.Platform = "unknown"
 	}
 	card := report.Score(d)
 	p.Valid, p.Score, p.Of = card.Valid, card.Score, card.Of
+	p.Complete = card.Valid && d.Grade.Complete
+	for _, id := range d.Grade.Unknown { // catalog IDs only (FIX-8); ANL-1 already refused any other
+		if _, ok := catalog.Get(id); ok {
+			p.Unknown = append(p.Unknown, id)
+		}
+	}
 	if !card.Valid {
 		p.Notes = []string{"The run is invalid, so it says nothing about the box and there is nothing to fix (GRD-5): run it again."}
 		return p
@@ -94,29 +115,31 @@ func Build(d report.Doc, runProvider, platform string) Plan {
 			unknown[id] = true
 		}
 	}
-	twn4 := map[string]bool{} // FIX-2: unknown only because the agent holds root's capabilities
-	if found["AMP-2"] {
-		for _, c := range d.Checks {
-			if unknown[c.ID] && c.Result == obs.Unknown && strings.Contains(c.Reason, "(TWN-4)") && strings.Contains(c.Reason, "CAP_") {
-				twn4[c.ID] = true
+	twn4 := map[string]bool{} // FIX-2: unknown while the agent holds a power TWN-4 names, from structured data only
+	if held, ok := heldCaps(d.Identity); ok && found["AMP-2"] {
+		for id := range unknown {
+			if c, ok := catalog.Get(id); ok && held&powers[c.Mechanism] != 0 {
+				twn4[id] = true
 			}
 		}
 	}
 
-	// Offer each entry whose trigger is found, with what it addresses here (FIX-3).
+	// Offer each entry whose trigger is found, with what it addresses here (FIX-3). A snippet's side effects are kept
+	// apart: they never count, and never take anything from another action.
 	type offer struct {
 		e        Entry
 		snip     Snippet
 		proven   bool
-		checks   map[string]bool // addressed: found checks, and TWN-4 unknowns for run-as-user
+		checks   map[string]bool // addressed: red triggers, and capability unknowns for run-as-user
 		provenOn map[string]bool // the addressed checks its snippet proved
+		sides    map[string]bool // red checks its snippet's rerun also cleared, beyond its triggers
 	}
 	var offers []*offer
 	for _, e := range Table {
 		if !slices.ContainsFunc(e.Triggers, func(id string) bool { return found[id] }) {
 			continue
 		}
-		o := &offer{e: e, checks: map[string]bool{}, provenOn: map[string]bool{}}
+		o := &offer{e: e, checks: map[string]bool{}, provenOn: map[string]bool{}, sides: map[string]bool{}}
 		o.snip, o.proven = e.Proven[platform]
 		for _, id := range e.Triggers {
 			if found[id] {
@@ -125,40 +148,22 @@ func Build(d report.Doc, runProvider, platform string) Plan {
 		}
 		if o.proven {
 			for _, id := range o.snip.Proves {
-				if found[id] {
-					o.checks[id], o.provenOn[id] = true, true
+				switch {
+				case !found[id]:
+				case o.checks[id]:
+					o.provenOn[id] = true
+				default:
+					o.sides[id] = true
 				}
 			}
 		}
 		if e.Unknowns {
 			for id := range twn4 {
 				o.checks[id] = true
-				if o.proven {
-					o.provenOn[id] = true
-				}
 			}
 		}
 		offers = append(offers, o)
 	}
-	// A check an offered proven snippet addresses isn't repeated as general advice elsewhere (FIX-3).
-	covered := map[string]bool{}
-	for _, o := range offers {
-		for id := range o.provenOn {
-			covered[id] = true
-		}
-	}
-	var kept []*offer
-	for _, o := range offers {
-		for id := range o.checks {
-			if covered[id] && !o.provenOn[id] {
-				delete(o.checks, id)
-			}
-		}
-		if len(o.checks) > 0 {
-			kept = append(kept, o)
-		}
-	}
-	offers = kept
 	byID := map[string]*offer{}
 	for _, o := range offers {
 		byID[o.e.ID] = o
@@ -228,6 +233,8 @@ func Build(d report.Doc, runProvider, platform string) Plan {
 			Prediction: Prediction}
 		for _, id := range catalog.IDs() { // catalog order, so the output is stable
 			switch {
+			case o.sides[id]:
+				a.MayAlsoClear = append(a.MayAlsoClear, id)
 			case !o.checks[id]:
 			case found[id]:
 				a.Findings = append(a.Findings, id)
@@ -280,6 +287,47 @@ func Build(d report.Doc, runProvider, platform string) Plan {
 	}
 	p.Loop = loop(runProvider)
 	return p
+}
+
+// capBit is a capability's bit, by its name in catalog.CapNames.
+func capBit(name string) uint64 {
+	i := slices.Index(catalog.CapNames, name)
+	if i < 0 {
+		panic("no capability " + name)
+	}
+	return 1 << i
+}
+
+// powers are TWN-4's capabilities that keep a mechanism's refusals from standing, by catalog mechanism (FIX-2).
+var powers = func() map[string]uint64 {
+	past := capBit("SYS_ADMIN") | capBit("SYS_MODULE") | capBit("SYS_PTRACE") // everywhere
+	owner := capBit("CHOWN") | capBit("FOWNER") | capBit("SETUID") | capBit("DAC_OVERRIDE")
+	read := past | owner | capBit("DAC_READ_SEARCH") | capBit("SETGID")
+	return map[string]uint64{
+		"file_read":  read,
+		"read_perm":  read,
+		"proc_open":  past | capBit("SETUID") | capBit("SETGID"),
+		"write_perm": past | owner | capBit("SETGID"),
+		"sudo_paths": past,
+		"env_names":  0, "net_table": 0, "self_status": 0, "": 0,
+	}
+}()
+
+// heldCaps is the agent's effective, permitted and ambient capabilities from the report's identity; ok is false when
+// there is no identity or a set doesn't parse, and then nothing is decided from it (FIX-2).
+func heldCaps(id *obs.Identity) (uint64, bool) {
+	if id == nil {
+		return 0, false
+	}
+	var held uint64
+	for _, set := range []string{id.CapEff, id.CapPrm, id.CapAmb} {
+		v, err := strconv.ParseUint(set, 16, 64)
+		if err != nil {
+			return 0, false
+		}
+		held |= v
+	}
+	return held, true
 }
 
 func mustGet(id string) *catalog.Check {

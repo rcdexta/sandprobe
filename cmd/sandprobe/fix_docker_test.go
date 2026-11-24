@@ -40,7 +40,8 @@ func TestFixLoopDocker(t *testing.T) {
 		t.Fatalf("%v\n%s", err, b)
 	}
 	// A weak box like the demo's: an agent user with a writable home, a secret-shaped ENV, root by default, the default
-	// network. Its variants: no ENV (clean-env's image change), and a long-running process of its own (--entrypoint).
+	// network. Its variants: no ENV (clean-env's image change), a long-running process of its own (--entrypoint), and a
+	// credential in the agent's own home beside root's /etc/shadow (FIX-3's side-effect case).
 	build := func(dockerfile string, files map[string]string) string {
 		dir := t.TempDir()
 		for name, body := range files {
@@ -59,6 +60,7 @@ func TestFixLoopDocker(t *testing.T) {
 	idle := map[string]string{"agent-idle": "#!/bin/sh\nexec sleep infinity\n"}
 	weakIdle := build("FROM "+weak+"\nCOPY agent-idle /usr/local/bin/agent-idle\n", idle)
 	cleanIdle := build("FROM "+clean+"\nCOPY agent-idle /usr/local/bin/agent-idle\n", idle)
+	weakCred := build("FROM "+weak+"\nRUN printf 'OPENAI_API_KEY=sandprobe-fake\\n' > /home/agent/.env && chown agent:agent /home/agent/.env && chmod 0600 /home/agent/.env\n", nil)
 	cleaned := map[string]string{weak: clean, weakIdle: cleanIdle}
 
 	runRound := func(s fixSetup) fixRound {
@@ -87,9 +89,14 @@ func TestFixLoopDocker(t *testing.T) {
 				r.red[id] = true
 			}
 		}
-		pb, err := exec.Command(bin, "fix", m[0], "-o", "json").Output()
-		if err != nil || json.Unmarshal(pb, &r.plan) != nil {
-			t.Fatalf("fix: %v %s", err, pb)
+		cmd := exec.Command(bin, "fix", m[0], "-o", "json")
+		pb, _ := cmd.Output()
+		if json.Unmarshal(pb, &r.plan) != nil {
+			t.Fatalf("fix: %s", pb)
+		}
+		// FIX-1: exit 5 exactly when the report is incomplete, with the plan still given.
+		if want := map[bool]int{true: exitGraded, false: exitPartial}[r.plan.Complete]; cmd.ProcessState.ExitCode() != want || r.plan.Complete != doc.Grade.Complete {
+			t.Fatalf("fix: exit %d, complete %v, report complete %v", cmd.ProcessState.ExitCode(), r.plan.Complete, doc.Grade.Complete)
 		}
 		return r
 	}
@@ -121,8 +128,9 @@ func TestFixLoopDocker(t *testing.T) {
 		return i >= 0 && r.card.Rows[i].Green
 	}
 
-	// Each action alone, from each baseline: every claimed check was red and is no longer.
-	proved := map[string]bool{} // "action check" pairs a rerun showed
+	// Each action alone, from each baseline: every check it addressed was red and is no longer. A side effect is only
+	// recorded when it cleared; it is never asserted, since it may not clear on another box (FIX-3).
+	proved := map[string]bool{} // "action check" pairs a rerun showed red, then cleared
 	for name, tc := range map[string]struct {
 		s    fixSetup
 		only string // the one action to apply from this baseline; every proven one when empty
@@ -148,6 +156,11 @@ func TestFixLoopDocker(t *testing.T) {
 				}
 				proved[a.ID+" "+id] = true
 			}
+			for _, id := range a.MayAlsoClear {
+				if before.red[id] && !after.red[id] {
+					proved[a.ID+" "+id] = true
+				}
+			}
 			for _, c := range a.CouldTurnGreen {
 				if !green(after, c) {
 					t.Errorf("%s, %s: %s isn't green after it", name, a.ID, c)
@@ -158,6 +171,19 @@ func TestFixLoopDocker(t *testing.T) {
 			}
 		}
 	}
+	// The side effect that doesn't hold: on a root box with a credential in the agent's home, run-as-user closes
+	// /etc/shadow but not the credential, and remove-credential-files stays offered before and after (FIX-3).
+	before := runRound(fixSetup{image: weakCred})
+	ru := slices.IndexFunc(before.plan.Actions, func(a fix.Action) bool { return a.ID == "run-as-user" })
+	if ru < 0 || !slices.Contains(before.plan.Actions[ru].MayAlsoClear, "SEC-3") ||
+		!slices.ContainsFunc(before.plan.Actions, func(a fix.Action) bool { return a.ID == "remove-credential-files" }) {
+		t.Fatalf("credential in home: want run-as-user that may clear SEC-3 and remove-credential-files: %+v", before.plan.Actions)
+	}
+	after := runRound(apply(fixSetup{image: weakCred}, before.plan.Actions[ru]))
+	if !after.red["SEC-3"] || !slices.ContainsFunc(after.plan.Actions, func(a fix.Action) bool { return a.ID == "remove-credential-files" }) {
+		t.Errorf("credential in home: after run-as-user, SEC-3 red %v, actions %+v", after.red["SEC-3"], after.plan.Actions)
+	}
+
 	for _, e := range fix.Table {
 		for _, id := range e.Proven["docker"].Proves {
 			if !proved[e.ID+" "+id] {

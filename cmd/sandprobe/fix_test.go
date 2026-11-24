@@ -4,18 +4,20 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	osexec "os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
+	"sandprobe/internal/analysis"
 	"sandprobe/internal/fix"
 	"sandprobe/internal/host"
 	"sandprobe/internal/obs"
 	"sandprobe/internal/report"
 )
 
-// FIX-1, FIX-4: flags, -provider only on a run exec report and only from the fixed list, and exit codes.
+// FIX-1, FIX-4: flags, -platform only on a run exec report and only from the fixed list, and exit codes.
 func TestFixCLI(t *testing.T) {
 	const vibe = "../../demo/reports/vibe.json" // a run docker report
 	exec := skipSaved(t, "exec", host.Options{Excluded: host.ExecExclusions(), ExcludedKind: obs.SkipOptIn})
@@ -29,14 +31,17 @@ func TestFixCLI(t *testing.T) {
 		{[]string{"fix", vibe, "-o", "yaml"}, exitUsage, "-o takes text or json"},
 		{[]string{"fix", vibe, "-y"}, exitUsage, "flag provided but not defined"},
 		{[]string{"fix", "/dev/null"}, exitUsage, "unsupported, inconsistent or unsafe report input"},
-		{[]string{"fix", vibe, "-provider", "modal"}, exitUsage, "-provider applies only to a run exec report"},
-		{[]string{"fix", exec, "-provider", "nowhere"}, exitUsage, "-provider takes one of"},
-		{[]string{"fix", exec, "-provider", "exec"}, exitUsage, "-provider takes one of"},
+		{[]string{"fix", vibe, "-platform", "modal"}, exitUsage, "-platform applies only to a run exec report"},
+		{[]string{"fix", exec, "-platform", "nowhere"}, exitUsage, "-platform takes one of"},
+		{[]string{"fix", exec, "-platform", "exec"}, exitUsage, "-platform takes one of"},
 		{[]string{"fix", vibe}, exitGraded, "Fixes for Docker"},
 		{[]string{"fix", vibe, "-o", "json"}, exitGraded, `"schema": "sandprobe.fix/1"`},
 		{[]string{"fix", exec}, exitGraded, "Fixes for an unknown platform"},
 		{[]string{"fix", exec}, exitGraded, "Not an action for an agent:"},
-		{[]string{"fix", exec, "-provider", "modal", "-o", "json"}, exitGraded, `"platform": "modal"`},
+		{[]string{"fix", exec, "-platform", "modal", "-o", "json"}, exitGraded, `"platform": "modal"`},
+		{[]string{"fix", vibe, "-provider", "modal"}, exitUsage, "flag provided but not defined: -provider"},
+		{[]string{"fix", "../../test/reports/canary-down.json"}, exitPartial, "This report is incomplete: "},
+		{[]string{"fix", "../../test/reports/canary-down.json", "-o", "json"}, exitPartial, `"complete": false`},
 	} {
 		var out, errb bytes.Buffer
 		code := run(tc.args, &out, &errb)
@@ -157,5 +162,54 @@ func TestFixHostileProvider(t *testing.T) {
 		if s := out.String(); strings.Contains(s, "PWNED") || strings.Contains(s, "proven on Docker") || strings.Contains(s, `"platform": "docker"`) {
 			t.Errorf("%v: the report's provider string reached the output:\n%s", args, s)
 		}
+	}
+}
+
+// FIX-1: an incomplete report keeps its plan, says so in text and JSON, names its unknowns, and exits 5.
+func TestFixIncomplete(t *testing.T) {
+	const down = "../../test/reports/canary-down.json" // valid, incomplete: the canary was down
+	d, err := analysis.Load(down)
+	if err != nil || !d.Grade.Valid || d.Grade.Complete || len(d.Grade.Unknown) == 0 {
+		t.Fatalf("%s isn't a valid, incomplete report: %v", down, err)
+	}
+	var out, errb bytes.Buffer
+	if code := run([]string{"fix", down, "-o", "json"}, &out, &errb); code != exitPartial {
+		t.Fatalf("exit %d, want %d", code, exitPartial)
+	}
+	var p fix.Plan
+	if err := json.Unmarshal(out.Bytes(), &p); err != nil {
+		t.Fatal(err)
+	}
+	if !p.Valid || p.Complete || !slices.Equal(p.Unknown, d.Grade.Unknown) || len(p.Actions) == 0 || p.Loop == nil {
+		t.Errorf("plan: valid %v complete %v unknown %v, %d actions", p.Valid, p.Complete, p.Unknown, len(p.Actions))
+	}
+	out.Reset()
+	run([]string{"fix", down}, &out, &errb)
+	if want := fix.IncompleteLine(len(d.Grade.Unknown)); !strings.HasPrefix(out.String(), want+"\n") || !strings.Contains(out.String(), "1. ") {
+		t.Errorf("text doesn't open with %q, or has no plan:\n%s", want, out.String())
+	}
+	// A complete report says nothing of the kind, and exits 0.
+	out.Reset()
+	if code := run([]string{"fix", "../../demo/reports/vibe.json"}, &out, &errb); code != exitGraded || strings.Contains(out.String(), "incomplete") {
+		t.Errorf("a complete report: exit %d:\n%s", code, out.String())
+	}
+}
+
+// FIX-10: examples/modal/bridge.py's guards, against a fake modal module (examples/modal/bridge_test.py). It runs
+// isolated (-I), with no Modal token in its environment or home, so the real SDK can never be reached.
+func TestModalBridge(t *testing.T) {
+	py, err := osexec.LookPath("python3")
+	if err != nil {
+		t.Skip("no python3 on PATH")
+	}
+	cmd := osexec.Command(py, "-I", "-B", "../../examples/modal/bridge_test.py")
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "MODAL_") && !strings.HasPrefix(kv, "HOME=") {
+			cmd.Env = append(cmd.Env, kv)
+		}
+	}
+	cmd.Env = append(cmd.Env, "HOME="+t.TempDir())
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%v\n%s", err, out)
 	}
 }

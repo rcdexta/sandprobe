@@ -11,16 +11,16 @@ import (
 	"sandprobe/internal/fix"
 )
 
-const fixUsage = "sandprobe fix <report.json> [-provider <name>] [-o json]"
+const fixUsage = "sandprobe fix <report.json> [-platform <name>] [-o json]"
 
 // fixCmd is FIX-1: a saved report's red checks as ranked actions, offline. It has its own flags, like feedback.
 func fixCmd(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("fix", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	o := opts{stdout: stdout}
-	var provider string
+	var platformFlag string
 	fs.StringVar(&o.out, "o", "text", "output: text or json")
-	fs.StringVar(&provider, "provider", "", "run exec reports only: the platform the box runs on, such as modal or docker (FIX-4)")
+	fs.StringVar(&platformFlag, "platform", "", "run exec reports only: the platform your person says the box runs on, such as modal or docker (FIX-4)")
 	positional, err := parse(fs, args)
 	if err != nil {
 		return reportErr(o, stderr, fail("usage", err.Error(), fixUsage, exitUsage))
@@ -32,7 +32,7 @@ func fixCmd(args []string, stdout, stderr io.Writer) int {
 		return reportErr(o, stderr, fail("usage", "name one saved report file", fixUsage, exitUsage))
 	}
 	known := feedbackProviders() // FBK-1's fixed list (FIX-4)
-	if provider != "" && (!known[provider] || provider == "exec") {
+	if platformFlag != "" && (!known[platformFlag] || platformFlag == "exec") {
 		var names []string
 		for n := range known {
 			if n != "exec" {
@@ -40,7 +40,7 @@ func fixCmd(args []string, stdout, stderr io.Writer) int {
 			}
 		}
 		slices.Sort(names)
-		return reportErr(o, stderr, fail("usage", "-provider takes one of: "+strings.Join(names, ", "), fixUsage, exitUsage))
+		return reportErr(o, stderr, fail("usage", "-platform takes one of: "+strings.Join(names, ", "), fixUsage, exitUsage))
 	}
 	d, err := analysis.Load(positional[0])
 	if err != nil {
@@ -51,11 +51,11 @@ func fixCmd(args []string, stdout, stderr io.Writer) int {
 		runProvider = d.Run.Provider
 	}
 	switch {
-	case provider != "" && runProvider != "exec":
-		return reportErr(o, stderr, fail("usage", "-provider applies only to a run exec report: this report's own provider sets the platform",
+	case platformFlag != "" && runProvider != "exec":
+		return reportErr(o, stderr, fail("usage", "-platform applies only to a run exec report: this report's own provider sets the platform",
 			"sandprobe fix <report.json>", exitUsage))
 	case runProvider == "exec":
-		platform = provider
+		platform = platformFlag
 	case runProvider != "other":
 		platform = runProvider
 	}
@@ -65,7 +65,7 @@ func fixCmd(args []string, stdout, stderr io.Writer) int {
 	} else {
 		printFix(o.stdout, p)
 	}
-	if !p.Valid {
+	if !p.Valid || !p.Complete { // FIX-1: as scorecard does; an incomplete plan is still printed
 		return exitPartial
 	}
 	return exitGraded
@@ -79,6 +79,9 @@ func printFix(w io.Writer, p fix.Plan) {
 	if !p.Valid {
 		line("", "", "Score: none (invalid run)")
 	} else {
+		if !p.Complete {
+			line("", "", fix.IncompleteLine(len(p.Unknown)))
+		}
 		line("", "", fmt.Sprintf("Score %d/%d. Fixes for %s, most effective first.", p.Score, p.Of, fix.Name(p.Platform)))
 	}
 	if len(p.Actions) > 0 {
@@ -93,7 +96,10 @@ func printFix(w io.Writer, p fix.Plan) {
 			line(in+"Found: ", in+"       ", strings.Join(a.Findings, ", "))
 		}
 		if len(a.Unknowns) > 0 {
-			line(in+"Unknown only because of root's capabilities: ", in+"  ", strings.Join(a.Unknowns, ", "))
+			line(in+"Undecided while the agent holds its capabilities: ", in+"  ", strings.Join(a.Unknowns, ", "))
+		}
+		if len(a.MayAlsoClear) > 0 { // FIX-3: a side effect, never a reason to skip another action
+			line(in+"May also clear: ", in+"  ", strings.Join(a.MayAlsoClear, ", ")+". "+fix.SideEffect)
 		}
 		if len(a.CouldTurnGreen) > 0 {
 			green := strings.Join(a.CouldTurnGreen, ", ")
