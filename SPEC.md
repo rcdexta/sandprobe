@@ -3086,8 +3086,9 @@ platform's own setting only where a rerun proved it there, and labels everything
     root:root /home/agent; chmod 0755 /home/agent; mkdir -p /work; chown agent:agent /work`, and `workdir="/work"` on
     exec; it cleared PER-1, PER-3 and PER-4. The last two were proven with `run-as-user` in place, so when both are
     offered they come after it. A round changed two things at once; each check is credited to the change whose
-    mechanism reaches it (users and files, or the network, or the environment). SEC-2 stayed found in every round
-    and AMP-3 was never found, so no Modal snippet claims either.
+    mechanism reaches it (users and files, or the network, or the environment). SEC-2 stayed found in every round (it
+    counted `run exec`'s own launcher shell, which LNC-1 now leaves out) and AMP-3 was never found, so no Modal snippet
+    claims either.
   - **Docker**, from FIX-9's fixture test, each action alone from a baseline where its triggers are red:
     `run-as-user` `--user 1000:1000 --cap-drop ALL` (AMP-2, SEC-3, PER-2, and the TWN-4 unknowns of a root agent
     holding `CAP_SYS_PTRACE`); `no-new-privileges` `--security-opt no-new-privileges` (AMP-3); `block-network`
