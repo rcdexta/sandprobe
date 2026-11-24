@@ -220,6 +220,44 @@ Research harnesses, such as the managed Nitro and Daytona coding evaluations, li
 [experiments/](experiments/README.md). They aren't part of the product. Their run records stay local and must not be
 committed here.
 
+## Fix loop
+
+A run ends with a score. `sandprobe fix` turns the saved report into changes you can make to the sandbox's own config
+or code, most effective first, and the steps to check each one:
+
+```sh
+sandprobe run docker my-agent-image -as agent -y -out round-1
+sandprobe fix round-1/*.json
+# apply the top action, for example --network none, then:
+sandprobe run docker my-agent-image -as agent -y -out round-2 -- --network none
+sandprobe compare round-1/*.json round-2/*.json
+sandprobe fix round-2/*.json
+```
+
+Each action names the checks it should clear and the categories that could turn green. Where a rerun proved a setting
+on that platform, it gives that setting and what it costs: today Docker, from a fixture test, and Modal, from a run
+by hand ([docs/providers/modal.md](docs/providers/modal.md)). Everywhere else it gives the check's own fix, labelled
+general advice. Every action is a prediction: only the rerun and `compare` show it worked. `fix` reads the report
+offline and changes nothing. For a `run exec` report, `-provider <name>` says which platform the box runs on.
+
+On Docker the loop reaches 6/6 from a root box with a key in its environment and an open network, in five rounds:
+`--network none`, `--read-only --tmpfs /tmp`, `--user 1000:1000 --cap-drop ALL`, `--security-opt no-new-privileges`,
+and the image rebuilt without the key. Read that 6/6 for what it is:
+
+- The box has no network at all, so the agent has no model API either. No egress setting short of that is proven.
+- Two greens rest on checks that can't prove a negative: Cloud access reads "Green · not proven", and Exfiltration
+  carries "not proven: DNS, UDP 53".
+- On a bare box only Sandprobe's idle process runs, so SEC-2 and SEC-5 have no other process to find. With the image's
+  own process running as the agent's user, they find it, and it takes a sixth round: the container's processes as
+  another user (`--user 1001:1001`), the agent through `-as agent`.
+
+**For agents:** run, then `sandprobe fix <report.json> -o json`, and show your person the top action: its title, the
+checks, the setting and its costs. Apply it to the sandbox's own config or code only with their OK; never apply a
+change without it. Rerun into a new `-out` folder, `sandprobe compare` the two reports, and repeat until `fix` has
+nothing actionable or your person stops. Never add `-provider` yourself, to `fix` or to a run: pass it only when your
+person names the platform. Something under "Not an action for an agent" is never yours to change, Cloud access left
+untested included.
+
 ## Send feedback
 
 Found a bug, or want something? Sandprobe files it as a public issue on
