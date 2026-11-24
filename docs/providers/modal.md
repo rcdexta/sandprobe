@@ -97,7 +97,9 @@ What it costs, and what stays:
   the sandbox.
 - DNS and UDP 53 then have no receipt, which isn't proof, so Exfiltration reads green with "not proven: DNS, UDP 53".
 - Modal's domain and CIDR allowlists weren't tested in this loop, so nothing here says how they treat DNS.
-- SEC-2 stayed red in every round: the probe counts the shell `run exec` starts as another process of the agent's.
+- SEC-2 stayed red in every round, because the probe then counted the shell `run exec` started as another of the
+  agent's processes. `run exec` now runs Sandprobe's own wrapper there and leaves it out (LNC-1 to LNC-5), so on a rerun
+  SEC-2 should reflect only the box's own processes; these rounds predate that.
 - Cloud access stays "Not tested", as above.
 
 ## What's skipped, and why

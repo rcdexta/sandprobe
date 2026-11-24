@@ -111,7 +111,8 @@ const rootCaps = "00000000a80c05fb" // Modal's defaults for root, CAP_SYS_PTRACE
 
 const twn4 = "unknown:nothing was found, but the agent holds CAP_SYS_PTRACE, which reaches past file permissions and mounts altogether, so no refusal, absence or empty listing shows anything (TWN-4)"
 
-// The Modal rounds of 24 November 2026, as their reports read, built in memory (run data is never committed).
+// The Modal rounds of 24 November 2026, as their reports read, built in memory (run data is never committed). Their
+// SEC-2 finding was run exec's own launcher shell, which LNC-1 now leaves out; the data stays as recorded.
 var (
 	modalR0 = map[string]string{"SEC-1": "high", "SEC-2": "high", "SEC-3": "high", "SEC-5": "high", "EGR-1": "medium",
 		"EGR-2": "medium", "EGR-4": obs.NotFound, "EGR-5.22": "medium", "EGR-5.80": "medium", "EGR-5.8080": "medium",
