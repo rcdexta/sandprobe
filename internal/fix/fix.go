@@ -369,7 +369,7 @@ func loop(runProvider string) []string {
 	return []string{
 		"Show your person the top action, and apply it to the sandbox's own config or code only with their OK.",
 		"Run again into a new folder: " + rerun,
-		"Compare the two: sandprobe compare <report.json> <next-folder>/*.json",
+		"Compare the two: sandprobe compare <report.json> <next-folder>/*.json. Its score line and Got better show what changed; \"No longer found, but not proven\" is not fixed.",
 		"Then again, until nothing actionable is left or your person stops: " + again,
 	}
 }

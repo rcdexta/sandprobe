@@ -237,7 +237,9 @@ sandprobe fix round-2/*.json
 Each action names the checks it should clear and the categories that could turn green. Where a rerun proved a setting
 on that platform, it gives that setting and what it costs: today Docker, from a fixture test, and Modal, from a run
 by hand ([docs/providers/modal.md](docs/providers/modal.md)). Everywhere else it gives the check's own fix, labelled
-general advice. Every action is a prediction: only the rerun and `compare` show it worked. `fix` reads the report
+general advice. Every action is a prediction: only the rerun and `compare` show it worked. `compare` prints the
+score of each report (`Score: 1/6 → 3/6`) and lists what "Got better", which counts only a check that now passes with
+proof or is verified absent. "No longer found, but not proven" and "No longer applies" are not fixes. `fix` reads the report
 offline and changes nothing. For a `run exec` report, `-platform <name>` says which platform the box runs on.
 
 An action is offered for the checks it was written for. When a setting proven elsewhere may also clear other checks,
@@ -258,7 +260,8 @@ and the image rebuilt without the key. Read that 6/6 for what it is:
 
 **For agents:** run, then `sandprobe fix <report.json> -o json`, and show your person the top action: its title, the
 checks, the setting and its costs. Apply it to the sandbox's own config or code only with their OK; never apply a
-change without it. Rerun into a new `-out` folder, `sandprobe compare` the two reports, and repeat until `fix` has
+change without it. Rerun into a new `-out` folder, `sandprobe compare` the two reports and tell your person its score line and
+`got_better`; treat `no_longer_found_not_proven` and `no_longer_applicable` as not fixed. Repeat until `fix` has
 nothing actionable or your person stops. Exit 5 with `complete: false` still carries a plan: say the report is
 incomplete when you show it. Never add `-platform` to `fix`, or `-provider` to a run, yourself: pass one only when
 your person names the platform. Something under "Not an action for an agent" is never yours to change, Cloud access

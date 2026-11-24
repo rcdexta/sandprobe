@@ -63,7 +63,8 @@ sandprobe fix round-0/*.json -platform modal            # you name the platform;
 ```
 
 Then apply the top action, create a new sandbox, run again into `round-1` (with `-as agent` once the agent has its own
-user), and `sandprobe compare round-0/*.json round-1/*.json`. The script's `round-1` and `round-2` setups are the
+user), and `sandprobe compare round-0/*.json round-1/*.json`. It prints `Score: 0/6 → 3/6` and what "Got better";
+DNS and UDP 53 under `block_network=True` show as "No longer found, but not proven", which isn't a fix. The script's `round-1` and `round-2` setups are the
 fixes below.
 
 If the sandbox ended at its timeout before `rm`, `rm` finds no live sandbox with the tag and refuses, touching
