@@ -5,12 +5,18 @@ Run with: python3 -I -B examples/modal/bridge_test.py (cmd/sandprobe's TestModal
 import importlib.util
 import io
 import json
+import logging
 import os
 import stat
+import subprocess
 import sys
 import tempfile
+import threading
 import types
 import unittest
+import warnings
+
+SENTINEL = "SENTINEL_SDK_SECRET"
 
 
 class FakeWorld:
@@ -20,6 +26,12 @@ class FakeWorld:
         self.calls = []  # ("exec"|"terminate"|"create", sandbox id)
         self.fail_create = None  # an exception create raises before returning
         self.terminate_confirms = True
+        self.fail = set()  # where the fake SDK raises SENTINEL (FIX-10's sanitizing tests)
+
+
+def boom(where):
+    if where in world.fail:
+        raise RuntimeError(SENTINEL + " at " + where)
 
 
 world = FakeWorld()
@@ -38,13 +50,26 @@ class FakeApp:
         return FakeApp(world.apps[name])
 
 
+class FakeStream:
+    def __init__(self, where, chunks):
+        self.where, self.chunks = where, chunks
+
+    def __iter__(self):
+        for c in self.chunks:
+            boom(self.where)
+            yield c
+        boom(self.where)
+
+
 class FakeProcess:
     def __init__(self):
-        self.stdin = types.SimpleNamespace(write=lambda b: None, drain=lambda: None, write_eof=lambda: None)
-        self.stdout = [b"probe output\n"]
-        self.stderr = []
+        self.stdin = types.SimpleNamespace(write=lambda b: boom("stdin_write"), drain=lambda: boom("drain"),
+                                           write_eof=lambda: boom("write_eof"))
+        self.stdout = FakeStream("stdout", [b"probe output\n"])
+        self.stderr = FakeStream("stderr", [b"probe note\n"])
 
     def wait(self):
+        boom("wait")
         return 0
 
 
@@ -68,21 +93,41 @@ class FakeSandbox:
 
     @staticmethod
     def list(app_id=None, tags=None):
+        boom("list")
+        if any(sb.done for sb in world.sandboxes):
+            boom("list_after_terminate")
         for sb in world.sandboxes:
             if not sb.done and sb.app_id == app_id and all(sb.tags.get(k) == v for k, v in (tags or {}).items()):
                 yield sb
 
     def exec(self, *argv, **kw):
         world.calls.append(("exec", self.object_id))
+        if "warn" in world.fail:
+            warnings.warn(SENTINEL + " in a warning")
+        if "log" in world.fail:
+            logging.getLogger("modal-client").error(SENTINEL + " in a log line")
+        if "unraisable" in world.fail:
+            Unraisable()
+        if "thread" in world.fail:  # a thread of the SDK's own, which no pump guards
+            t = threading.Thread(target=lambda: boom("thread"))
+            t.start()
+            t.join()
         return FakeProcess()
 
     def terminate(self):
         world.calls.append(("terminate", self.object_id))
+        boom("terminate")
         if world.terminate_confirms:
             self.done = True
 
     def poll(self):
+        boom("poll")
         return 0 if self.done else None
+
+
+class Unraisable:
+    def __del__(self):
+        raise RuntimeError(SENTINEL + " in __del__")
 
 
 fake = types.ModuleType("modal")
@@ -271,5 +316,67 @@ class Bridge(unittest.TestCase):
         self.assertNotIn("secret detail", sys.stderr.getvalue())
 
 
+def child(verb, fails):
+    """One child process: create through the fake, then fail at fails and run verb through bridge.main."""
+    state = os.path.join(tempfile.mkdtemp(), "s.state")
+    if "thread" in fails:
+        world.fail.add("thread")
+    try:
+        bridge.create("round-0", state)
+    except SystemExit as e:
+        if e.code:
+            raise
+    world.fail |= set(fails)
+    bridge.main(["bridge.py", verb, state])
+
+
+class Sanitized(unittest.TestCase):
+    """FIX-10, AGENTS rule 3: whatever the SDK raises, warns or logs, only fixed text and a type reach the terminal,
+    under python -X dev, with the documented exit code."""
+
+    def run_child(self, verb, *fails):
+        p = subprocess.run([sys.executable, "-I", "-B", "-X", "dev", os.path.abspath(__file__), "--child", verb, *fails],
+                           input=b"echo hi\n", capture_output=True, timeout=60)
+        out = p.stdout.decode(errors="replace") + p.stderr.decode(errors="replace")
+        self.assertNotIn(SENTINEL, out, f"{verb} {fails}: SDK text reached the terminal:\n{out}")
+        self.assertNotIn("Traceback", out, f"{verb} {fails}: a traceback:\n{out}")
+        return p.returncode, out
+
+    def test_sh_failures(self):
+        for fail in ("stdout", "stderr", "stdin_write", "drain", "write_eof", "wait"):
+            with self.subTest(fail=fail):
+                code, out = self.run_child("sh", fail)
+                self.assertEqual(code, 1, out)
+                self.assertIn("RuntimeError", out)
+
+    def test_sh_list_failure_refuses(self):
+        code, out = self.run_child("sh", "list")
+        self.assertEqual(code, 2, out)
+
+    def test_rm_failures(self):
+        for fails, want in ((("list",), 2), (("terminate",), 7), (("poll",), 7), (("list_after_terminate",), 7)):
+            with self.subTest(fails=fails):
+                code, out = self.run_child("rm", *fails)
+                self.assertEqual(code, want, out)
+
+    def test_noise_the_sdk_makes(self):
+        for fail, line in (("warn", "bridge: warning (UserWarning)"), ("log", None),
+                           ("unraisable", "bridge: an error was ignored (RuntimeError)"),
+                           ("thread", "bridge: a worker failed (RuntimeError)")):
+            with self.subTest(fail=fail):
+                code, out = self.run_child("sh", fail)
+                self.assertEqual(code, 0, out)
+                if line:
+                    self.assertIn(line, out)
+
+    def test_success_still_passes_output(self):
+        code, out = self.run_child("sh")
+        self.assertEqual(code, 0, out)
+        self.assertIn("probe output", out)
+        self.assertIn("probe note", out)
+
+
 if __name__ == "__main__":
+    if len(sys.argv) > 2 and sys.argv[1] == "--child":
+        child(sys.argv[2], sys.argv[3:])
     unittest.main(verbosity=1)

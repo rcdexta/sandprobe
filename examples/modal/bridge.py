@@ -13,6 +13,7 @@ Exit codes: 0 done; 1 failed, with anything created terminated and confirmed; 2 
 anything; 7 a sandbox may still run (its ID is printed, and it ends at its timeout).
 """
 import json
+import logging
 import os
 import re
 import secrets
@@ -21,8 +22,42 @@ import stat
 import sys
 import threading
 import time
+import warnings
 
-import modal
+
+# Nothing an SDK raises, logs or warns reaches the terminal as text: only fixed lines and an exception's type
+# (FIX-10, AGENTS rule 3). These hooks catch what the boundary in main can't: threads, unraisable errors, warnings
+# and the SDK's own logging.
+def _say(line):
+    try:
+        sys.stderr.write(line + "\n")
+        sys.stderr.flush()
+    except Exception:
+        pass
+
+
+def _uncaught(kind, value, tb):
+    _say(f"bridge: failed ({kind.__name__})")
+
+
+def _thread_uncaught(args):
+    if args.exc_type is not SystemExit:
+        _say(f"bridge: a worker failed ({args.exc_type.__name__})")
+
+
+def _unraisable(u):
+    _say(f"bridge: an error was ignored ({type(u.exc_value).__name__})")
+
+
+def _warning(message, category, filename, lineno, file=None, line=None):
+    _say(f"bridge: warning ({category.__name__})")
+
+
+sys.excepthook, threading.excepthook, sys.unraisablehook = _uncaught, _thread_uncaught, _unraisable
+warnings.showwarning = _warning
+logging.disable(logging.CRITICAL)
+
+import modal  # noqa: E402  (after the hooks, so its import can't print either)
 
 APP = "sandprobe"
 TAG_KEY = "sandprobe-bridge"
@@ -220,10 +255,14 @@ def sh(state):
         argv, env = AGENT + ["--reset-env", "sh"], None
     else:
         argv, env = AGENT + ["sh"], {"HOME": "/home/agent", "USER": "agent", "LOGNAME": "agent"}
-    try:
-        p = sb.exec(*argv, env=env, text=False, workdir="/work" if cfg["protect_home"] else None)
-    except Exception as e:
-        stop(1, f"exec failed ({type(e).__name__})")
+    p = sb.exec(*argv, env=env, text=False, workdir="/work" if cfg["protect_home"] else None)
+    failed = []  # the type of whatever a pump raised; never its text
+
+    def guard(fn, *args):
+        try:
+            fn(*args)
+        except BaseException as e:
+            failed.append(type(e).__name__)
 
     def pump_in():
         while True:
@@ -240,13 +279,15 @@ def sh(state):
             dst.write(chunk if isinstance(chunk, bytes) else chunk.encode())
             dst.flush()
 
-    threads = [threading.Thread(target=pump_in, daemon=True),
-               threading.Thread(target=pump, args=(p.stderr, sys.stderr.buffer), daemon=True)]
+    threads = [threading.Thread(target=guard, args=(pump_in,), daemon=True),
+               threading.Thread(target=guard, args=(pump, p.stderr, sys.stderr.buffer), daemon=True)]
     for t in threads:
         t.start()
-    pump(p.stdout, sys.stdout.buffer)
+    guard(pump, p.stdout, sys.stdout.buffer)
     code = p.wait()
     threads[1].join(timeout=5)
+    if failed:
+        stop(1, f"the session with the sandbox failed ({failed[0]})")
     sys.exit(code if isinstance(code, int) else 1)
 
 
@@ -272,13 +313,27 @@ def rm(state):
     print(f"terminated {rec['id']}: finished, and nothing running with its tag", file=sys.stderr)
 
 
-if __name__ == "__main__":
-    verb = sys.argv[1] if len(sys.argv) > 1 else ""
-    if verb == "create" and len(sys.argv) == 4:
-        create(sys.argv[2], sys.argv[3])
-    elif verb == "sh" and len(sys.argv) == 3:
-        sh(sys.argv[2])
-    elif verb == "rm" and len(sys.argv) == 3:
-        rm(sys.argv[2])
-    else:
+# The exit code when a verb fails past its own handling: sh 1; rm 7, since the sandbox may still run; create 1 (it
+# handles every failure after create itself).
+FAILED = {"create": 1, "sh": 1, "rm": 7}
+
+
+def main(argv):
+    verb = argv[1] if len(argv) > 1 else ""
+    fn, n = {"create": (create, 4), "sh": (sh, 3), "rm": (rm, 3)}.get(verb, (None, 0))
+    if fn is None or len(argv) != n:
         stop(2, "usage: bridge.py create <setup> <state> | sh <state> | rm <state>")
+    try:
+        fn(*argv[2:])
+    except SystemExit:
+        raise
+    except KeyboardInterrupt:
+        stop(FAILED[verb], f"{verb} interrupted")
+    except BaseException as e:  # one boundary for the whole verb: exec, pumps, wait, list, terminate, poll
+        if verb == "rm":
+            stop(7, f"NOT CONFIRMED: rm failed ({type(e).__name__}); the sandbox may still run until its timeout")
+        stop(FAILED[verb], f"{verb} failed ({type(e).__name__})")
+
+
+if __name__ == "__main__":
+    main(sys.argv)
