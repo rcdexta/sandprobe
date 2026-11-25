@@ -43,7 +43,7 @@ This bounded extension supersedes only the blanket exclusion of user-invoked off
 
 - **JON-1 Strict framing.** Protocol JSON is one bounded value, depth at most64, with no trailing data. Duplicate object member names, including case aliases which Go would map to the same field, are rejected before decoding. Case-distinct object names are conservatively rejected; arrays retain case-sensitive values. No raw malformed data/member names are echoed. Unknown-field rules on existing protocols remain strict. Preserve valid canonical existing messages and saved-run shapes.
 - **JON-2 Every boundary and tests.** Apply JON-1 to host observation parsing and every probe stdin mode, with the existing1MiB byte bound checked before parsing (not a truncated reader accepted as EOF). Reject unsupported/extra probe arguments. Add duplicate/alias/nesting/trailing/oversize/fuzz regressions. CI runs build/vet/unit tests on Linux without cloud/provider credentials; no live provider tests or new paid resources.
-- **ANL-1 Saved report input.** Offline analysis accepts only explicitly named report files opened with no-follow/nonblocking semantics and fstat-verified regular descriptors under an8MiB max+1 read bound and JON-1 framing. A supported schema, exactly the version its fields need (AGT-6), canonical known catalog IDs/results, unique checks, required grade/run/manifest fields and consistency between selected/skipped/check/unknown/completeness metadata are required. Missing/contradictory evidence is an error or incomplete, never a clean result. A `run exec` report's declared provider (PRV-17) is the person's word as recorded, but what it excludes comes from this binary's own table, never from the report: a name the table lacks, one on a report that isn't `run exec`, or skip kinds that differ from that name's entry are refused. Fixed errors do not echo file contents. Negative results must be legal for their catalog kind and include exported proof metadata; grade counts/findings must agree with checks where derivable. A `sandprobe/1` to `sandprobe/5` report still carries GRD-1's letter, checked as before (one of A, B, C, D or F on a valid run, empty on an invalid one); a `sandprobe/6` report carries no `letter` in any form (AGT-6). A saved letter is never printed, never copied into any output (the page `-out` re-renders included) and never an input to success/regression decisions. Analysis structurally validates exported reports, does not re-verify raw observations or canary receipts, and cannot authenticate or attest to an edited report. Every offline rendering of a saved report (`scorecard` in text, JSON and the page `-out` re-renders, `profile`, `assess`, `compare`, `fix`) says so plainly: structurally checked only, its observations and receipts not re-verified, and an edited report can't be told apart.
+- **ANL-1 Saved report input.** Offline analysis accepts only explicitly named report files opened with no-follow/nonblocking semantics and fstat-verified regular descriptors under an8MiB max+1 read bound and JON-1 framing. A supported schema, exactly the version its fields need (AGT-6), canonical known catalog IDs/results, unique checks, required grade/run/manifest fields and consistency between selected/skipped/check/unknown/completeness metadata are required. Missing/contradictory evidence is an error or incomplete, never a clean result. A `run exec` or `run -recipe` report's declared provider (PRV-17) is the person's word as recorded, but what it excludes comes from this binary's own table, never from the report: a name the table lacks, one on a report that is neither `run exec`'s nor `run -recipe`'s, or skip kinds that differ from that name's entry are refused. Fixed errors do not echo file contents. Negative results must be legal for their catalog kind and include exported proof metadata; grade counts/findings must agree with checks where derivable. A `sandprobe/1` to `sandprobe/5` report still carries GRD-1's letter, checked as before (one of A, B, C, D or F on a valid run, empty on an invalid one); a `sandprobe/6` report carries no `letter` in any form (AGT-6). A saved letter is never printed, never copied into any output (the page `-out` re-renders included) and never an input to success/regression decisions. Analysis structurally validates exported reports, does not re-verify raw observations or canary receipts, and cannot authenticate or attest to an edited report. Every offline rendering of a saved report (`scorecard` in text, JSON and the page `-out` re-renders, `profile`, `assess`, `compare`, `fix`) says so plainly: structurally checked only, its observations and receipts not re-verified, and an edited report can't be told apart.
 - **ANL-2 Coverage profile.** Five fixed areas are egress(EGR), secrets(SEC-1/2/3/5), privilege(AMP-1/2/3/8.sys/8.blk), persistence(PER), provider reach(SEC-4/AMP-4/5/6/7). SEC-3 stays aggregate secrets; no image/provider attribution is inferred. Each catalog check requires an explicit area mapping; an unmapped future check blocks offline analysis until classified. Counts distinguish findings, negative proofs, find-only no-finding, absent/out-of-scope, unknown, excluded and missing catalog coverage. No profile labels a wall secure/Held or reports the saved letter (GRD-1): its JSON is `sandprobe.profile/2`, which is `sandprobe.profile/1` without `reported_grade_unverified`. Invalid reports have no assessed area. Terminal output escapes untrusted identifiers, including Unicode format controls (Cf), bidi overrides/isolates, zero-width format characters and BOM as visible code points; JSON labels reported data as unauthenticated and self-observed.
 - **CMP-1 Local comparison.** Compare two structurally validated reports by known check IDs/results/severities and declared scope/identity, never a saved letter or prose heuristics. The report version is not compared, so a `sandprobe/6` report against an older one of the same run reads unchanged. Flag new/worse findings and loss of coverage separately; removed/skipped/unknown checks cannot look like an improvement. Compare per-check scope/route, kind/evidence class, selected/skipped targets and recorded identity/config; unrecorded configuration remains unknown. Provider/mode/context differences are explicit; no-observed-change is conditional on matched coverage/context and means only the summarized fields, not equivalent security or an attestation. Ignore ephemeral runIDs/timestamps/nonces/receipt destinations when comparing observations. Keep invalid/incomplete inputs visible. Exit precedence is input/usage2, invalid/incomplete or unmatched context5, observed regression6, then assessed/no observed regression0. Automated gates must reject every nonzero exit and inspect both findings and context fields, rather than gate only on exit6. No network, file writes, schedules or notifications.
 - **CMP-2 Progress between two runs (24 November 2026).** A fix loop runs, applies fixes, runs again and compares, so `compare` also says what got better, without weakening CMP-1. From two valid reports (GRD-5) that ANL-1 accepts, check by check in catalog order:
@@ -88,7 +88,7 @@ Since `sandprobe/6` (AGT-6) no generic output carries the letter (GRD-1), and ev
   category stays red.
   A category is not applicable only when every one of its checks was skipped and each skip's kind is `provider_terms`:
   a native adapter's PRV row excludes that provider-owned endpoint under Sandprobe's reviewed scope for that provider
-  (PRV-5), or, on `run exec`, the PRV row of the provider the operator declared with `-provider` does (PRV-17). The
+  (PRV-5), or, on `run exec` or `run -recipe`, the PRV row of the provider the operator declared with `-provider` does (PRV-17). The
   kind's wire name stays `provider_terms`, but what it means is that reviewed scope, which rests on the provider's
   terms for some providers and on the project owner's own rules of engagement for others (Modal's, PRV-5), never on a
   claim about the provider's terms alone. In
@@ -106,7 +106,7 @@ Since `sandprobe/6` (AGT-6) no generic output carries the letter (GRD-1), and ev
   <name>; Sandprobe did not verify it".
   A kind is never taken on the report's word: the scorecard derives each
   check's kind from this binary's own policy for the provider the run names (a native adapter's PRV-row exclusions are
-  `provider_terms`; `run exec`'s and a shipped recipe's defaults are `opt_in`, except that on a `run exec` report whose
+  `provider_terms`; `run exec`'s and a recipe's defaults are `opt_in`, except that on a `run exec` or `run -recipe` report whose
   manifest declares a provider (PRV-17) the checks that provider's PRV row excludes are `provider_terms`; any other
   provider has none), uses it
   only when the manifest records the same, and ANL-1 refuses a saved report whose recorded kinds disagree with it, so
@@ -1582,7 +1582,8 @@ one, the amended text lands in place only after review.
   A shipped recipe's exclusions are lifted the same way: `-provider-endpoints` may name only checks its header
   excludes, each under the person's PRV-15 attestation.
   `sandprobe run -recipe <file>` runs a person's own recipe with the default exclusions, which only PRV-15's per-check
-  `-provider-endpoints` attestation lifts; its plan shows the file's SHA-256 and says Sandprobe hasn't reviewed that
+  `-provider-endpoints` attestation lifts. `-provider <name>` (PRV-17) lifts none: it only changes why the ones that
+  provider's entry excludes are skipped, from `opt_in` to `provider_terms`, and never runs a check. Its plan shows the file's SHA-256 and says Sandprobe hasn't reviewed that
   provider's terms. A person's own recipe is trusted host code: it runs with the person's own credentials and
   permissions, and the plan says so. Built: the shipped recipes (`run kubernetes`); `-recipe <file>` isn't yet.
 - **PRV-16 Kubernetes, by recipe.** `sandprobe run kubernetes [-as <user>] -y` makes one throwaway pod in the
@@ -2032,7 +2033,7 @@ Severity is that of a finding. Kind: 2 is two-sided, F is find-only. Evidence: P
   a provider whose rules exclude them or under PRV-15's or RCP-4's default), only by the host, and each with its
   reason; AMP-2 and AMP-3 never are. A provider-endpoint skip (SEC-4, EGR-3, AMP-6, AMP-7) also records its kind in
   the manifest's `SkipKinds` (SCR-2): `provider_terms` from a native adapter's PRV row (PRV-5) or from the PRV row of
-  the provider a `run exec` declares (PRV-17), `opt_in` under PRV-15's or RCP-4's default. Skips change no finding, count or completeness.
+  the provider a `run exec` or `run -recipe` declares (PRV-17), `opt_in` under PRV-15's or RCP-4's default. Skips change no finding, count or completeness.
 - **GRD-4 The score says what it covers.** Beside every score: "graded on N checks for this box at <time>, from a
   host-shipped probe's own observations; not a certification", SBX-10's boundary, the not-proven list (KND-2), and the
   scoped-out and skipped lists.
@@ -2088,7 +2089,7 @@ Severity is that of a finding. Kind: 2 is two-sided, F is find-only. Evidence: P
   proof-coverage regression floor: a higher-severity finding inside an already-red category, or a proven `pass`
   degrading to find-only `not_found` (`Green · not proven`), can leave `Score` unchanged and still exit 0, and `-min full`
   accepts 5/5 when Cloud access is not applicable (`Of == 5`). On providers whose reviewed scope excludes Cloud access (`Of == 5`),
-  `run exec` with PRV-17's `-provider` among them, `-min 6` can never pass and is refused before creation (for `run
+  `run exec` and `run -recipe` with PRV-17's `-provider` among them, `-min 6` can never pass and is refused before creation (for `run
   exec`, before anything runs in the box) with exit 2 pointing to `-min full`. Regression-sensitive CI
   must gate on `sandprobe compare` or validated OUT-1 JSON (`findings`, `grade.counts`, `checks`). Retired letter values
   (`-min A` to `-min F`) fail with exit 2. After a run, 7 takes precedence over 6, 6 over 5, and 5 over 0. A run that
@@ -2224,14 +2225,19 @@ Severity is that of a finding. Kind: 2 is two-sided, F is find-only. Evidence: P
 | `sandprobe guide` | the agent guide; `-install claude` writes a Claude Code skill, `-install codex` an AGENTS.md block | the skill or block only |
 | `sandprobe schema` | the JSON Schema for OUT-1 | no |
 | `sandprobe feedback bug\|feature\|idea` | shows a public issue for summationai/sandprobe, then files exactly that one with the person's consent (FBK-1, FBK-5) | an issue, only with `-confirm <code>` or a typed yes |
+| `sandprobe pin <report.json> -recipe <file>\|-docker <image>` | previews a pin of a saved report's result, every red finding accepted by name with a reason, then writes exactly that file with the person's consent (PIN-1 to PIN-9) | the pin file, only with `-confirm <code>` or a typed yes |
+| `sandprobe verify [-pin <file>]` | makes a fresh box the way the pin says, probes it, and says whether the pin still holds (VFY-1 to VFY-9) | yes, needs `-y`; never the pin |
 
 - **AGT-3 Approval.** Outside a terminal, anything that creates, resets or deletes needs `-y`. Without it, `run`
   exits 3 and prints the plan as JSON with `needs_approval: true`. A local proxy for EGR-3 needs `-allow-local-proxy`, or EGR-3 is skipped. An existing box also needs `-attest <provider id>`,
   naming the box the person confirmed isn't production. The guide tells agents to show the plan to their person and
-  get both before running again. The provider `run exec -provider` names (PRV-17) comes only from the person: an agent
+  get both before running again. The provider `run exec -provider` or `run -recipe -provider` names (PRV-17) comes only from the person: an agent
   never infers it from the exec command, a hostname, the environment, a report or provider-like text, and never adds
   or changes it to turn a red category into not applicable. The guide, every block it installs and the CLI's own help
-  say so, and no remediation text suggests the flag.
+  say so, and no remediation text suggests the flag. A pin is the person's as well: an agent never confirms one or
+  answers its prompt, never passes an `-accept` reason its person didn't give, and never edits a pin file, or what
+  it binds, to make `verify` hold (PIN-7, VFY-8); the guide, every block it installs and the CLI's own help say that
+  too.
 - **AGT-4 Streams.** `-o json` prints one OUT-1 document on stdout at the end. `-o ndjson` prints one event per line
   (`step`, `check`, `result`, `error`). Logs go to stderr.
 - **AGT-5 Errors say what to do.** `{"error": "<code>", "message": "...", "fix": "<command or action>"}`, with codes
@@ -2268,6 +2274,23 @@ Severity is that of a finding. Kind: 2 is two-sided, F is find-only. Evidence: P
   older report this reader takes, valid or invalid and whichever of versions 1 to 5 it declares, reads back that way.
   The one writer left for those versions is the managed-workload evaluations' legacy standard report
   (WGR-4, RUN-17, EVD-10), until that path drops the letter too.
+  Two records that PIN-3 names aren't in OUT-1 yet: `run -recipe`'s recipe SHA-256 (RCP-4) and `run docker`'s image ID
+  (PRV-14). Each is a new field, and which version it takes follows from the rules above, by whether a release has
+  shipped a `sandprobe/6` reader. None has yet, on 24 November 2026: 0.3.2 reads `sandprobe/1` to `sandprobe/5`, and
+  `sandprobe/6` is unreleased. A record that lands before the release that first ships `sandprobe/6` joins
+  `sandprobe/6`, as version 2's two fields were both new in one release: no reader of that version exists to refuse
+  it, every report a run writes still declares `sandprobe/6`, and that version then takes the fields of versions 2 to
+  5 and these. A record that lands after that release is breaking, since a shipped `sandprobe/6` reader refuses the
+  unknown field (JON-1): it takes `sandprobe/7`, which takes every field `sandprobe/6` takes. Then a report carrying
+  neither record needs none of version 7's fields and keeps `sandprobe/6`, byte for byte, by the lowest-version rule,
+  so older readers go on reading every report that didn't change; only `run -recipe` and `run docker` reports move.
+  PRV-17's `declared_provider` on a `run -recipe` report needs no version of its own in either case. The field is
+  version 5's, under its own rules; what widens is the kind of run it may sit on, and every `run -recipe` report
+  carries the recipe record (PIN-3), so it declares that record's version, and a reader from before it refuses the
+  report as unsupported, or for the unknown field, before it reads the declaration. Once `-recipe <file>` lands, this
+  qualifies two sentences above: `run -recipe` writes `declared_provider` as well as `run exec`, and a `run -recipe`
+  report carrying it declares the recipe record's version. The rule that adds each record writes its version here, in
+  place.
 
 ### PRV: providers
 
@@ -3136,10 +3159,12 @@ tested: opt in with -provider-endpoints SEC-4,AMP-7 if your provider's terms all
 provider whose PRV row excludes those checks, that red can never be acted on, and an agent running a fix loop chases
 it forever. PRV-17 lets the operator name the provider, so this binary's own PRV row for it decides those checks, as it
 already does for that provider's native adapter. It amends PRV-15, SCR-2, GRD-3, ANL-1, AGT-3, AGT-6, OUT-1 and OUT-4
-in place, each pointing here.
+in place, each pointing here. Its last item, on `run -recipe`, also amends RCP-4 and FIX-4, and isn't built: it
+waits on RCP-4's `-recipe <file>`.
 
 - **PRV-17 A declared provider.** `sandprobe run exec -provider <name> ...` and `sandprobe plan exec -provider <name>
-  ...` name the provider the box runs on.
+  ...` name the provider the box runs on. So do `run -recipe` and `plan -recipe`, under this rule's last item; until
+  it, the rule speaks of `run exec`.
   - **The name comes from the person, never from an agent.** The operator names it. An agent running Sandprobe never
     infers it from the exec command, a hostname, the environment, a report or any provider-like text, and never adds
     or changes it to turn a red category into not applicable. The CLI's own help (`sandprobe help`) says so today,
@@ -3160,7 +3185,7 @@ in place, each pointing here.
   - **Usage errors, before the plan exists (exit 2):** a name the table lacks, `exec`, `docker`, `aws-nitro`,
     `kubernetes` and a differently cased key among them, where the error lists the valid names, sorted, and never
     echoes the value given, since it may be pasted text or a credential; an empty value; the flag anywhere but `run
-    exec` and `plan exec` (a native adapter is already its own provider, a shipped recipe keeps RCP-4's exclusions,
+    exec`, `run -recipe` and their plans (a native adapter is already its own provider, a shipped recipe keeps RCP-4's exclusions,
     `run docker` runs these checks, and an offline command reads only what a report records); and
     `-provider-endpoints` naming a check the declared provider's entry excludes, since that scope keeps it off. That
     error's fix is "leave out -provider-endpoints for the checks that scope excludes", never a change of provider.
@@ -3174,8 +3199,8 @@ in place, each pointing here.
   - **Recording.** The report still records the run as provider `exec` (`run.provider`). The host writes the name to
     the manifest's `declared_provider`, beside `SkipKinds` and `Attested`: like them it is a policy input the host
     fixed before the probe ran, so it belongs in the host's record (GRD-5), and it never reaches the probe's input.
-    Only `run exec` writes it, only when `-provider` was given, and a report carrying it declares `sandprobe/6`
-    (`sandprobe/5` before the letter left OUT-1, AGT-6). `Execute` refuses, before anything runs, a name the table lacks, a run that isn't `run exec`'s (kind
+    Only `run exec` and `run -recipe` write it, only when `-provider` was given, and a report carrying it declares `sandprobe/6`
+    (`sandprobe/5` before the letter left OUT-1), or, on `run -recipe`, the version its recipe record needs (AGT-6). `Execute` refuses, before anything runs, a name the table lacks, a run that isn't `run exec`'s (kind
     `opt_in`, no workload contract, no EVD-10 protocol), and exclusions that don't carry each of the entry's checks
     with the entry's own reason, unattested; so this binary never writes a report its own reader refuses.
   - **Policy.** For a report whose `run.provider` is `exec` and whose manifest has `declared_provider`, SCR-2's policy
@@ -3212,7 +3237,7 @@ in place, each pointing here.
     endpoints, so the score is out of 5. The operator declared the provider as <name>; Sandprobe did not verify it".
   - **ANL-1.** A saved report is refused (exit 2, as for any refused input) when: `declared_provider` is present but
     empty or null, or present under `sandprobe/1` to `sandprobe/4` (AGT-6); it is on a report whose `run.provider`
-    isn't `exec`, or beside any workload contract (WGR-1, RUN-17's included) or EVD-10's protocol; it names a provider
+    isn't `exec` and that isn't a `run -recipe` report, or beside any workload contract (WGR-1, RUN-17's included) or EVD-10's protocol; it names a provider
     this binary's table lacks, a report from a newer binary with a newer entry included, since its kinds can't be
     checked; any check the entry excludes isn't skipped with kind `provider_terms`, or is attested; or any other check
     carries `provider_terms`. As today, `provider_terms` on a `run exec` report without `declared_provider` is
@@ -3250,6 +3275,32 @@ in place, each pointing here.
     accepted this under the trust boundary above: it holds only while the name comes from the person and every result
     says it is unverified. Regression-sensitive gates use `compare` or OUT-1's JSON, as OUT-4 already says. Nothing
     stronger is available without trusting the box or contacting the provider.
+  - **A person's own recipe (24 November 2026, with "Pin and verify").** `sandprobe run -recipe <file> -provider
+    <name>` and `sandprobe plan -recipe <file> -provider <name>` take the same declaration under every condition
+    above: it is the person's own statement, a key of this binary's table, typed for each run with no alias and no
+    environment default, never inferred, added or changed by an agent, recorded as declared and not verified, and said
+    so in every plan and result. Without it, a fresh box from a person's own recipe scores out of six with Cloud
+    access "Not tested", and never lines up with the same person's `run exec -provider` rounds out of five.
+    - **How it meets RCP-4's default exclusions.** An own recipe still runs with PRV-15's four excluded, and the
+      declaration changes only why. Each of the four that the entry excludes is skipped with the entry's own reason
+      and kind `provider_terms`, in place of its `opt_in` skip. The rest keep `opt_in`, which only
+      `-provider-endpoints` lifts, and never for a check the entry excludes. So the declaration selects no check,
+      contacts nothing more, and can only move a default-excluded check from "Not tested" to outside Sandprobe's
+      reviewed scope: it never runs more.
+    - **Only the flag declares.** The recipe's own header (`provider:`, `exclusions:`) is the person's text too, but
+      it is never read as the declaration, never matched against the table, and never changes a kind. A shipped recipe
+      (`run kubernetes`) still takes no `-provider`: its reviewed PRV row decides (RCP-4).
+    - **Recording and reading.** The report records the run as the own-recipe run it is, never as the declared
+      provider, with `declared_provider` in its manifest (AGT-6). How such a report marks itself is RCP-4's to define
+      when `-recipe <file>` is built. This item needs only that a reader can tell it from every other kind of run, and
+      that every such report carries its recipe record (PIN-3), on which AGT-6's version rests. SCR-2's policy, the
+      plan section, the result sentences, `-min 6`'s refusal, ANL-1's refusals and `compare` then read it exactly as
+      they read a `run exec` report with a declared provider.
+    - **Why the trust argument still holds.** Sandprobe created this box, but through the person's recipe, which is
+      the person's host code and says nothing Sandprobe can check about whose endpoints the box sits behind. So the
+      provider is still the person's word, with the standing "What this changes" gives it, and the same cost on a
+      `-min full` gate. `verify` asks for it again on its own command line (VFY-3), so a pin never becomes a second
+      source of it.
 
 ## Fix loop, 24 November 2026
 
@@ -3300,8 +3351,8 @@ platform's own setting only where a rerun proved it there, and labels everything
   (`docker`, the shipped recipes such as `kubernetes`, and the native providers); for a `run exec` report, `-platform`
   names it from the same list, and without it the platform is unknown. `-platform` on any other report is a usage
   error, as is a name outside the list. It is the person's own declaration: an agent passes it only when its person
-  names the platform, never by inference. A `run exec` report's declared provider (PRV-17's `declared_provider`)
-  never picks the platform either: it decides only what SCR-2 counts, so a `-provider modal` report whose Cloud
+  names the platform, never by inference. A `run exec` or `run -recipe` report's declared provider (PRV-17's
+  `declared_provider`) never picks the platform either: it decides only what SCR-2 counts, so a `-provider modal` report whose Cloud
   access is not applicable lists Cloud access nowhere, and still gets Modal's snippets only with `-platform modal`. Snippets exist for two platforms, each from a rerun:
   - **Modal**, from three `run exec` rounds on one throwaway sandbox per round (python:3.12-slim-bookworm, commands
     through the SDK's `Sandbox.exec`), 24 November 2026. Round 0, Modal's defaults (root, network open): 0/6. Round 1,
@@ -3416,6 +3467,423 @@ platform's own setting only where a rerun proved it there, and labels everything
   may still fail, and it counts, even when the remote's end caused it, since the bridge can't tell that from a broken
   session (the safe side: exit 1, never a false success). Marking the end never waits for a call in flight.
 
+## Pin and verify, 24 November 2026
+
+So a sandbox that was fixed stays fixed. The fix loop ends at a score (FIX-7), and the fixes then move into whatever
+the person's provider reuses: an image, a template, a snapshot with a launch wrapper. That step is the person's
+agent's, in the person's own repository. Two runs already prove a fresh box made that way: `sandprobe run -recipe
+<file>` with the person's own recipe (RCP-4), and `sandprobe run docker <image>` (PRV-14). This section adds what
+comes after. `sandprobe pin` records the proven result, and what the person accepted of it, in a small file committed
+beside the sandbox's definition. `sandprobe verify` makes a fresh box the same way and says whether that still holds.
+Nothing here is built. It rests on RCP-4's `-recipe <file>`, which isn't built either, and on two records the runs add
+to their reports: the recipe's SHA-256, and the ID of the image `run docker` probed (PIN-3, AGT-6). The recipe is
+always the person's own file, in their own repository. Sandprobe supplies no recipe for a provider's sandbox, and
+reviews and vouches for none, and no rule here knows a provider. It amends AGT-2, AGT-3 and AGT-6 in place, each
+pointing here, and PRV-17's own section extends that rule to `run -recipe`.
+
+"Not in v1" stands. `verify` is one run on demand, started by a person, a CI job or an agent, and then it exits.
+Sandprobe schedules nothing, keeps no history, sends no alert and hosts nothing. The pin is one file in the person's
+repository: Sandprobe writes it only when the person confirms it, and its history is the repository's.
+
+- **PIN-1 A pin is an expectation the person signed off, not evidence.** A pin says what the person expects a fresh
+  box to show, and which findings they accepted and why. It proves nothing about any box. The file is unauthenticated:
+  anyone who can write to the repository can edit it, and Sandprobe can't tell an edited pin from a confirmed one. An
+  edit can change only what `verify` expects. `verify`'s verdict, its score and every result it prints come from its
+  own fresh run (VFY-3, VFY-6), never from the pin. No other command reads a pin, and `pin` reads the one it replaces
+  only to show the difference (PIN-8). The control on the file is the person's review of its diff, as for any
+  committed file; PIN-8 names a looser pin so that the diff is easy to read. This is why a pin may be made from a
+  saved report where SCR-7 refused to trust a saved card: that card was shown as a result, and nothing reads a pin as
+  one. A pin loosened behind the person's back makes `verify` expect less and does nothing else: it never turns a
+  finding green, since an accepted finding stays red everywhere (VFY-6). Nor does a pin, or a `verify` that holds, say
+  anything for the recipe. The recipe is the person's own host code (RCP-4), and Sandprobe neither wrote it, reviewed
+  it nor vouches for it. The hash in the pin binds the file's bytes and nothing about what they do: a recipe that
+  makes a box some other way than agents are really launched proves that other box, and only the person can know which
+  it is.
+- **PIN-2 The pin file.** `sandprobe pin` writes one JSON file, `sandprobe.pin.json` in the current directory unless
+  `-pin <file>` names another, and `sandprobe verify` finds it the same way. Its schema is `sandprobe.pin/1`,
+  versioned as AGT-6 versions OUT-1: a reader refuses unknown fields and duplicate or case-ambiguous keys (JON-1), so
+  a new field is a new version; a reader takes every version it knows and refuses any other as unsupported, naming the
+  versions it reads; an optional field is written only when it has a value, and one present but empty or null is
+  refused. The writer has one byte form (a fixed key order, two-space indent, one trailing newline), so the same
+  inputs give the same bytes, which PIN-7's code rests on. It holds:
+  - `schema`, and `sandprobe`, the version of the binary that wrote it. The catalog has no version of its own and none
+    is invented here: `checks` holds one row for every check in that binary's catalog, so the pin's own IDs say which
+    catalog it was pinned with (VFY-7).
+  - `run_started_at`, the pinned report's own run start (RFC 3339, UTC). It is the date of the proof, never of the
+    pinning, so the same inputs give the same file on any day; the repository's history says when it was committed.
+  - **How to make the box,** exactly one of two. `recipe {path, sha256, env}`: the person's own recipe as a
+    slash-separated path relative to the pin file's directory, at or below it (never absolute, never with a `..`
+    part), the SHA-256 of the file's bytes, and the `SANDPROBE_` names its header lists (RCP-1), names only. Or
+    `docker {image, image_id, options}`: the image reference as the person typed it; the ID of the image that was
+    probed, when the report records it (PIN-3); and the Docker options after `--`, word for word and in order. Beside
+    it, when given, `as`, and for a recipe `scratch`.
+  - **The person's statements for the run,** each only when it was made: `declared_provider` (PRV-17), `attested`
+    (PRV-15's `-provider-endpoints` IDs) and `allow_local_proxy` (AGT-3).
+  - `identity`, what the probe ran as (SBX-4), in the fields CMP-1 compares: `uid`, `gid`, the five capability sets,
+    `no_new_privs`, `seccomp`, and for the setuid scan whether it completed, its file count and the SHA-256 of its
+    sorted list, never the paths.
+  - `checks`: for each catalog check, in catalog order, its `id` and expected `result`, one of OUT-1's own; for a
+    finding, its `severity` and `evidence_class`; for a provider-endpoint skip, its kind (SCR-2). And `chains`: each
+    chain the grader formed (CHN-1, CHN-3), with its severity and whether it is potential.
+  - `accepted`: each accepted finding's ID with the person's reason (PIN-6).
+  - `unknown` and `not_proven`: the IDs of the checks expected `unknown`, and of the find-only checks expected
+    `not_found` (KND-2). They are two lists, as SCR-3 keeps Unknown apart from No finding. Neither is ever a pass, and
+    neither is ever accepted (PIN-5).
+  - `score {score, of}`: SCR-2's score of the pinned report.
+
+  `accepted`, `unknown`, `not_proven` and `score` repeat what `checks` and `chains` already say, for the person
+  reading the diff. Nothing trusts the repeat (VFY-2).
+- **PIN-3 What can be pinned.** `sandprobe pin <report.json>` reads one saved report exactly as ANL-1 requires, and
+  refuses one ANL-1 refuses with its fixed error. The run must be valid (GRD-5): an invalid run has no result to pin.
+  The report must say Sandprobe created the box in that run (`run.box.created_by_sandprobe`). And the run must be one
+  of two kinds, in this first version. Exactly one of `-recipe` and `-docker` is given, and it must be the report's
+  own kind.
+  - **A person's own recipe** (`run -recipe`, RCP-4). The person passes `-recipe <file>` again, and the file's SHA-256
+    must equal the recipe SHA-256 the report records. The file must also parse as a recipe within RCP-1's 64 KiB. That
+    record is the first dependency named above: every `run -recipe` report carries its recipe's SHA-256, which is also
+    how a reader tells such a report from every other kind (PRV-17, AGT-6), and until it does an own-recipe run can't
+    be pinned. `pin` reads the file and never runs it.
+  - **`run docker`** (PRV-14). The report keeps the image, as the box's name, and neither the Docker options nor
+    `-as`. Adding them to OUT-1 would bump its version (AGT-6) and put option text in every Docker report, so the
+    person passes them again: `-docker <image> [-as <user>] [-- <docker run options>]`. The report's provider must be
+    `docker`, `-docker`'s value must equal the report's box name byte for byte, and a numeric `-as` must equal the
+    report's uid.
+  - **The image's content.** A tag can be moved and nothing is pulled, so the pin also holds the ID of the image that
+    was actually probed (`sha256:` and 64 hex digits): the one Docker's own record of the created container gives
+    (`.Image`), read with a narrow format as DKR-2 reads its facts, which `run docker` records in its report. That
+    record is the second dependency. It is a new OUT-1 field (AGT-6), and until a Docker report carries it the pin
+    holds no `image_id`, and the preview says "pinned by tag only: verify can't say whether it probes the image this
+    was proven on". `pin` takes the ID from the report and never from the daemon: asked at pin time, the daemon says
+    what the tag names now, which may no longer be what was probed, and `pin` makes no call to Docker at all. It is an
+    image ID and not a repository digest, which an image built locally doesn't have.
+  - **What the report can't confirm.** The Docker options, an `-as` given as a name, and a recipe run's `-as` and
+    `-scratch` (which its report keeps only as a note) can't be checked against the report. The preview marks each "as
+    you gave it; the report doesn't record it". The first `verify` tests them: a box made another way differs in
+    identity, which `verify` never calls a hold (VFY-5), or in results, which it reads against the pin like any
+    change. `pin`'s output ends by saying so, with the `verify` command to run.
+  - **From the report, and only from it:** the person's statements for the run, the identity, each check's result,
+    severity, evidence class and skip kind, the chains, the image ID and the run's start. None is taken from the
+    command line, so a pin can't state a result the report doesn't hold.
+  - **Refused, each saying why and what to do instead** (exit 2). A `run exec` report, never pinnable: Sandprobe
+    didn't create that box, and nothing says the next one matches it. A `run kubernetes` report, not pinnable: that
+    recipe's settings reach it only as environment values, which a pin never holds (PIN-4), and it isn't the person's
+    file to fix them in, so nothing would bind the next box to the pinned one. A native adapter's report, not
+    pinnable: the adapter makes a box of Sandprobe's own default settings, never the person's template, so there is
+    nothing of theirs to hold. Each of those three gives the same way forward and no other: write a recipe of your own
+    that creates the box the way your agents are launched, keep it in your repository, prove it with `run -recipe`,
+    and pin that. No refusal points at a recipe Sandprobe would ship, or says one is coming: for a provider's sandbox
+    there is none, and the recipe stays the person's. A run made with `-no-canary` isn't pinnable in this version
+    either: today only `run exec` and `run kubernetes` take that flag (HCN-5), and a pin of such a run would need a
+    rule of its own. Any other report (`self`, `report`, a managed workload run) is refused as not a box Sandprobe
+    created through a pinnable run.
+- **PIN-4 What a pin never holds.** A pin is committed, often where more people read than run the box. It never holds
+  a box's ID or name; a path, file name, process, variable name, reason or any other string from the report's
+  evidence; a run ID, nonce or receipt; `sp_ready`'s target line or any other account, organization, project or
+  cluster identifier; an environment variable's value; or a credential. Everything in it is one of three kinds: a
+  value from a fixed vocabulary (check and chain IDs, results, severities, evidence classes, skip kinds, a provider
+  key of this binary's own table); a number, timestamp or digest in an exact form (the uid and gid, a count, the run's
+  start, a capability set as 16 hex digits, the SHA-256 of a recipe, of an image and of the setuid list, and an image
+  reference's `@sha256:` digest, as 64); or a string the person gave on `pin`'s own command line. From the report come
+  only the first two kinds, never free text. The one thing from neither is a recipe's setting names: they come from
+  the header of the recipe file the pin binds, as RCP-1 parses it, each a `SANDPROBE_` name in RCP-1's form.
+  - **The person's strings** are each reason, the recipe's path, the image reference, each Docker option word, `-as`
+    and `-scratch`. Each is valid UTF-8 with no control or Unicode format character, and within its bound: a reason is
+    one line, not blank, of at most 200 characters, and every other is at most 1 KiB, with at most 64 option words.
+    Each is scanned as FBK-4 scans an issue, home-directory paths included, and the option words also as the one line
+    a shell would join them into. Any match refuses the pin and exits 2. The refusal names the place and the pattern
+    and never prints the matched text, and Sandprobe never rewrites it: the person edits and runs again (FBK-4).
+    FBK-4's bare-hex rule would catch the fixed-form digests, so those aren't scanned as text: each must match its
+    exact form, and they are the only long hex strings a pin holds.
+  - **Docker options.** An option that carries an environment variable's value is refused: `-e NAME=value` and `--env
+    NAME=value`, each in either spelling, and `--env-file` whatever it names, since that file holds values. The
+    refusal names the option's position, never its text, and says to pass the name alone (`-e NAME`), which takes the
+    value from the environment of whoever runs `verify`. `--rm` is refused as PRV-14 refuses it.
+  - **Recipe settings** reach a recipe from the person's environment, under the names its header lists (RCP-1). The
+    pin holds those names and never a value, and `verify` takes each value from the environment it runs in. So a
+    setting that must be the same for every box, a template or snapshot name say, belongs in the person's own recipe
+    file: the pin binds that file's hash, and nothing binds an environment value. The preview says so beside the
+    names, and so does `verify`'s plan.
+- **PIN-5 An incomplete run can be pinned, and says so.** A report whose run is incomplete (GRD-2) can be pinned. Each
+  unknown check is recorded as `unknown` and listed under `unknown`: never as a pass, never under `not_proven`, and
+  never as accepted. `-accept` naming one is refused, since there is no finding to accept and a reason can't stand in
+  for a proof (KND, TWN). The preview then opens with "INCOMPLETE: n checks unknown. verify can't see a change in any
+  of them.", lists each by category and question, and PIN-7's code binds the list like everything else. The cost is
+  stated, not hidden: while a check stays unknown, `verify` can't tell whether it got worse, and says so every time
+  (VFY-4, VFY-6). Refusing incomplete reports was the alternative. It would leave any box where TWN-4 keeps a check
+  unknown, a root agent's among them, with no way to be held at all.
+- **PIN-6 Every red finding is accepted by name, with a reason.** A finding is red when its severity is above Info
+  (SCR-2's bar, as FIX-2 reads it), and every chain is. `-accept "<ID>[,<ID>...]: <reason>"`, repeatable, accepts the
+  named ones with that reason: the IDs are everything before the first colon, comma-separated, each spelled exactly as
+  the catalog or CHN spells it, and the reason is what follows, trimmed. There is no wildcard, no `all`, no category
+  name and no severity threshold. A pin is written only when every red finding in the report is named exactly once
+  across the `-accept` values. Refused, with exit 2:
+  - a red finding left unnamed. The refusal lists every missing ID in catalog order, each with its severity and its
+    category and question, from fixed text;
+  - a finding named twice, or a reason that is missing or blank;
+  - an ID that isn't a red finding in this report: a pass, an Info finding, an unknown, a skipped check or a chain the
+    grader didn't form. A pin never accepts ahead of time what wasn't found;
+  - anything that isn't an ID. It is never echoed, since it may be pasted text or a credential.
+
+  A chain is accepted under its own ID: accepting each check it joins doesn't accept what they add up to, which CHN
+  may grade above either. Each finding is accepted as found, at the severity and evidence class the report gives it,
+  and a later run that finds it worse isn't covered (VFY-4). A report with no red finding takes no `-accept`.
+- **PIN-7 Only the person pins.** The person's consent is bound to exactly the file that is written, as FBK-5 binds it
+  to an issue, and it replaces `-y`, which is a usage error here that says so. PIN-3's, PIN-4's and PIN-6's refusals
+  come first, whatever `-confirm` holds.
+  - **Preview.** Without `-confirm`, nothing is written. The command prints what would be: the file's path, and
+    whether a pin is there now; how the box is made (the recipe's path and full SHA-256 with its setting names, or the
+    image, its ID or the "pinned by tag only" line, the options and `-as`), marking what the report couldn't confirm
+    (PIN-3); the uid and gid the probe ran as; each of the person's statements, a declared provider with PRV-17's "The
+    operator declared the provider as <name>; Sandprobe did not verify it"; the score; each accepted finding with its
+    severity, its evidence class, its category and question, and its reason; each chain; the unknown list (PIN-5) and
+    the not-proven list; PIN-8's difference when a pin is there; ANL-1's note that the report was checked for
+    structure only; and PIN-1 in one fixed sentence: "A pin records what you expect and accept. It is not proof, and
+    anyone who can edit this file can change it." Then it prints a confirmation code and exits 3. The code is the
+    first 12 hex digits of SHA-256 over a fixed encoding of the bytes that would be written, the resolved path they
+    would be written to, and the SHA-256 of the file there now, or a fixed mark when there is none. `-o json` doesn't
+    change it.
+  - **Confirm.** `-confirm <code>` writes only when the code equals the code of what it would write now. Otherwise it
+    writes nothing and exits 3 with AGT-5's error `pin.changed`, which says the pin must be previewed and approved
+    again, and never prints the new code. A changed report, recipe, argument or reason, a pin at that path that
+    changed, appeared or went, and another Sandprobe version all change the code.
+  - **Terminal.** Only when FBK-5's own gate allows (standard input and output both this process's foreground
+    terminal, and none of `CI`, `SANDPROBE_NO_KEYS` or `TERM=dumb` set), and without `-o json` or `-confirm`, the
+    command may ask after the preview: "Write this pin to <path>? Type yes:". It reads the answer from `/dev/tty` and
+    accepts only `yes`. Anything else, or no `/dev/tty`, writes nothing and exits 3.
+  - **Writing.** The file is written whole to a new file beside the target, then renamed over it, mode 0644: never
+    through a symlink already there, and never over anything but a regular file. A write that fails leaves any pin
+    there as it was, says so, and exits 5.
+  - **Agents.** An agent never answers that prompt and never confirms a pin on its own judgement. It shows its person
+    the exact preview, with every accepted finding and its reason, the unknown list and any LOOSER line (PIN-8), and
+    asks. It runs again with `-confirm <code>` only after a clear yes in the conversation, and changes nothing in
+    between. It never passes an `-accept` reason its person didn't give: it may draft one, and passes it only in the
+    words its person approved for that finding. The guide, every block it installs and the CLI's own help say so
+    (AGT-3).
+- **PIN-8 Re-pinning.** When a pin is already at the target path, the preview reads it as `verify` does (VFY-2) and
+  shows the difference before the code, in plain words built from fixed text and catalog IDs: "now also accepts:", "no
+  longer accepts:", "accepted at a higher severity:", "no longer proven:" (expected `pass` or `absent` before, and not
+  now), "now unknown:", the findings whose reason changed, `Score: <old> -> <new>`, and what changed in how the box is
+  made or in the person's statements. Each check is named by its ID with its category and question (CMP-2's words).
+  - **Looser has one definition, and it is `verify`'s.** Read the new pin's expectations as if they were a fresh run,
+    against the old pin, through VFY-4's table and VFY-5's verdict. If that says Regressed, the preview says "LOOSER
+    than the pin it replaces" on its own line above the lists, and the JSON carries `looser: true`. If it says Can't
+    tell, the preview says "NOT COMPARABLE with the pin it replaces" and names what differs, never "not looser".
+    Otherwise it says "Not looser than the pin it replaces".
+  - A looser pin is allowed, since that is the person's call, and it is always named as looser. The code binds the old
+    file's bytes (PIN-7), so a pin can't be confirmed over any predecessor but the one previewed.
+  - An existing file that VFY-2 refuses can't be compared: the preview says the new pin would replace a file Sandprobe
+    couldn't read as a pin, and shows nothing from it. A first pin says "No pin there yet".
+- **PIN-9 Output.** In text the command prints the preview, then the code and what to do with it, or, once confirmed,
+  the path written and the `verify` command to run next. Every line is ASCII-safe under a C or POSIX locale and wraps
+  within 80 display columns (UX-9); a check is written `Secrets > <question>` there and with CMP-2's `›` elsewhere,
+  never `Secrets: <question>` (FBK-4). `-o json` prints one document: `pin`, the document as it would be or was
+  written; `path`; `replaces` (whether a pin was there); `unconfirmed`, the fields the report couldn't confirm;
+  `looser` and `not_comparable`; `difference`, PIN-8's lists as check IDs; and `written`. A preview adds
+  `needs_approval: true` and `confirm`, the code. A refusal under `-o json` is AGT-5's error: `report.input` for a
+  report ANL-1 refuses, `pin.refused` for PIN-3's, PIN-4's and PIN-6's, the last with `missing` (the unaccepted IDs)
+  and PIN-4's with `matches` as FBK-7 gives them, their text always `[REDACTED]`. Exit codes: 0 when the file was
+  written, whether the pinned run was complete or not; 2 for usage (`-y` included), a refused report and every refusal
+  above; 3 for a preview, a no, or a code that doesn't match; 5 for an invalid run, which has nothing to pin, or a
+  write that failed.
+
+- **VFY-1 One command.** `sandprobe verify [-pin <file>] -y [-out <dir>] [-o json]` makes a fresh box the way the pin
+  says, probes it, and says whether the pin still holds: one line for a CI job, a nightly job or an agent. How the box
+  is made comes from the pin and from nowhere else: the recipe and its hash, or the image and its options, with `as`
+  and `scratch`. `verify` has no flag for any of them and takes no image, no recipe, no `-no-canary` (PIN-3) and
+  nothing after `--`. Giving one is a usage error whose fix says that only a new pin changes them, so a person
+  overrides nothing at verify time. Its own flags are `-pin`, `-y`, `-o`, `-out` and `-theme`; for a recipe pin,
+  HCN-5's canary flags and environment values, which choose where receipts go and never what is checked (a Docker pin
+  refuses them, PRV-14); and the person's statements for the run (VFY-3). It takes no `-min`, since the pin is its bar
+  and OUT-4's `-min` belongs to `run`, and no `-confirm`.
+- **VFY-2 The pin is read as untrusted input, and rebuilt.** The pin is opened as ANL-1 opens a report: the one file
+  named, no-follow and nonblocking, an fstat-verified regular file, at most 256 KiB under a max+1 read bound, under
+  JON-1's framing. It is accepted only when all of this holds:
+  - the schema is one this binary reads, and every field has PIN-2's form: exactly one of `recipe` and `docker`, the
+    path at or below the pin's directory, each digest and the image ID in its exact form, each setting name a
+    `SANDPROBE_` name in RCP-1's form, and no optional field present but empty or null;
+  - every check ID is one of this binary's catalog, named once, with a result legal for that check's catalog kind
+    (ANL-1); a severity and an evidence class sit only on a finding, each from OUT-1's own vocabulary; a skip kind
+    sits only on a skipped provider-endpoint check; every chain ID is CHN's;
+  - the statements are ones a run would take: `declared_provider` is a key of this binary's table, `attested` is a
+    value PRV-15 allows, and each skip kind equals what this binary's own policy gives for that kind of run and that
+    declared provider, as ANL-1 requires of a report (SCR-2). So editing a kind in the pin alone changes nothing: it
+    is refused;
+  - every string the person gave passes PIN-4's bounds and scan again, so a credential pasted into a committed pin is
+    refused and never printed;
+  - the repeats agree with `checks` and `chains`: `accepted` names exactly their red findings and chains, each once
+    and each with a reason; `unknown` and `not_proven` are exactly the checks expected `unknown` and `not_found`; and
+    `score` equals what Score's own row builder (SCR-7's `buildRow`) gives for the pinned results under this binary's
+    policy.
+
+  Anything else is refused with a fixed error that echoes nothing from the file, exit 2, like every refused input
+  (CMP-1). A pin naming a check this catalog lacks comes from a newer Sandprobe, and its fix says to upgrade. A pin
+  whose skip kinds or score no longer agree with this binary's policy, after an upgrade changed a table entry say, is
+  refused the same way, and its fix says to prove the box again and pin again. As with SCR-7's card, no string and no
+  number reaches output on the pin's word: the pinned score `verify` prints is the one it rebuilt, a check is named
+  from the catalog, and the person's own strings are printed only after that scan, escaped (UX-6).
+- **VFY-3 The same run, planned and approved like one.** In order: the pin is read (VFY-2); the person's statements
+  are checked; the recipe is checked against its hash; the plan is shown and approved; then the run.
+  - **The person's statements are typed again.** PRV-17's declaration and PRV-15's attestation are typed for each run
+    and have no default source, and a pin isn't one. So `-provider`, `-provider-endpoints` and `-allow-local-proxy`
+    are given on `verify`'s own command line, and each must equal what the pin records, in both directions: one the
+    pin records and the line lacks, one the line gives and the pin lacks, or one that differs is a usage error before
+    anything runs (exit 2). The error names what the pin records, from fixed vocabulary, and never echoes the value
+    given. So an edit to the pin alone can't make a category not applicable or turn a provider-endpoint check on, and
+    in CI the line is the person's, reviewed with the file. AGT-3 holds for this line as for `run`: an agent never
+    adds or changes a statement on it.
+  - **The recipe gate.** For a recipe pin, `verify` reads the file once (a regular file, no-follow, at most RCP-1's 64
+    KiB) and requires its SHA-256 to equal the pinned one. If it differs, or the file isn't there, `verify` exits 5
+    before any `sh` starts, `sp_ready` included, with nothing created and nothing contacted. It says the recipe
+    changed since the pin, shows both hashes in full, and says to review the change, prove it with `run -recipe`, and
+    pin again. The bytes hashed are the bytes run: RCP-1 reads a recipe once and never again from disk. The pin's
+    setting names must then equal that file's own header, or the pin is refused as VFY-2 refuses an inconsistent one
+    (exit 2); the plan prints the recipe's names, never the pin's.
+  - **Docker.** A Docker pin has nothing that stops the run at this step: the image and options are the pin's own. The
+    image must exist locally, and `verify` pulls nothing (PRV-14). In `run docker`'s own read-only image check, before
+    approval, it asks the daemon which ID the pinned reference names now, and the plan says two things in fixed words.
+    First, how it probes: "by digest" when the reference itself carries `@sha256:`, else "by a mutable tag: this
+    probes whatever that tag names on this machine now". Second, against the pinned `image_id`: the same image the pin
+    was proven on; another image, with both IDs, "a different build from the one the pin was proven on"; or nothing to
+    compare, when the pin holds no ID. Neither changes the verdict or stops the run. Probing what the name builds to
+    now is the point of holding a template, and a person who wants the bytes held too pins a reference with a digest.
+    After the run, the result gives the ID from Docker's record of the created container, the one the fresh report
+    records, and the same two statements.
+  - **Plan and approval, as for a run** (UX-4, AGT-3). Without `-y` outside a terminal, `verify` exits 3 with the plan
+    as JSON and `needs_approval: true`; in a terminal it shows the plan and asks once. The plan is that run's own plan
+    with a pin section: the pin's path; the recipe's path and its full 64-digit SHA-256, that its functions run on
+    this machine with the person's own credentials and permissions, and that it is the person's own file, which
+    Sandprobe hasn't reviewed, with its provider's terms (RCP-4); the setting names, and that their values come from
+    this environment and aren't pinned (PIN-4); the person's statements, with PRV-17's unverified sentence; and the
+    pinned score with its accepted and unknown counts, as VFY-2 rebuilt them.
+  - **No recipe code before approval.** RCP-1 lets `plan` and an unapproved `run -recipe` call `sp_ready`, because the
+    person named that file on the command line. Here the file is named by another file in the repository, so `verify`
+    runs no recipe function until it is approved. The unapproved plan says, where RCP-1's target line would be, that
+    the target is named once `sp_ready` runs. After approval `sp_ready` runs first, and its target line goes to stderr
+    before the create, with the box's name and state path (RCP-2). The approval is of the recipe by its hash. A Docker
+    pin's plan makes only `run docker`'s own read-only calls.
+  - **One engine.** `verify` builds the arguments of `run -recipe` or `run docker` from the pin and its own line and
+    calls that runner. There is no second implementation of the canary choice, the transport, the manifest (GRD-5),
+    the checks, the grader, the cleanup and its budgets, the live phases (UX-5), the state file (RCP-2) or exit 7. It
+    writes the same OUT-1 and OUT-2 files to `-out`. They carry nothing from the pin, so the fresh report is a run's
+    report and reads as one everywhere.
+- **VFY-4 Check by check.** On a valid fresh run, each check in catalog order is read against the pin's expectation by
+  the table below. It is total: every pair lands in exactly one row, the catalog kind makes the pairs it leaves out
+  illegal (KND-1, KND-2), and a check with no row in the fresh report reads as `unknown` (GRD-5). The verdict comes
+  from these rows and the context (VFY-5), never from the two scores or their difference: a score can stay the same
+  while a check gets worse (OUT-4). Chains are read beside the rows: a chain the fresh run forms that the pin doesn't
+  hold, one at a higher severity, or one confirmed where the pin holds it as potential, is regressed; a chain the pin
+  holds and the fresh run doesn't form follows its checks' rows for the verdict, and is listed with the accepted
+  findings no longer found (VFY-6). So in a fresh run with nothing regressed, every finding, check or chain, is one
+  the pin holds at that severity or higher and in that evidence class, each red one with the person's reason; and
+  every `pass` or `absent` the pin expects is still one.
+
+| The pin expects | The fresh run has | Read as |
+|-|-|-|
+| `pass` or `absent` | `pass` or `absent` | as pinned |
+| `pass` or `absent` | a finding, of any severity | **regressed:** a new finding |
+| `pass` or `absent` | `unknown`, `not_found`, `scoped_out` or `skipped` | **regressed:** proof lost |
+| a finding | a finding of the same severity and evidence class | as pinned: when red, accepted and still present |
+| a finding | a finding of a higher severity, or of another evidence class | **regressed:** worse than accepted, as `compare` reads it (CMP-1) |
+| a finding | a finding of a lower severity and the same class | as pinned, noted as less severe; never listed as better (CMP-2) |
+| a finding | `pass` or `absent` | better (CMP-2's "Got better") |
+| a finding | `scoped_out` | no longer applies; never better (KND-1) |
+| a finding | `not_found` | no longer found, but not proven; never better (KND-2) |
+| a finding, `not_found` or `scoped_out` | `unknown` | **can't tell:** now unknown |
+| a finding, `not_found`, `scoped_out` or `unknown` | `skipped` | **can't tell:** the skips differ |
+| `not_found` or `scoped_out` | the same, or `pass` or `absent` | as pinned; proof gained isn't listed (CMP-2) |
+| `not_found`, `scoped_out`, `unknown` or `skipped` | a finding, of any severity | **regressed:** a finding nobody accepted |
+| `unknown` | `unknown` | as pinned: still unknown, and a change here can't be seen |
+| `unknown` | `pass` or `absent` | better |
+| `unknown` | `scoped_out` | no longer applies; never better |
+| `unknown` | `not_found` | as pinned; in neither list (CMP-2) |
+| `skipped` | `skipped`, of the same kind | as pinned |
+| `skipped` | `skipped` of another kind, or any other result but a finding | **can't tell:** the skips differ |
+
+- **VFY-5 The verdict and its exit code.** Before the run: 2 for usage, a refused pin and a statement that doesn't
+  match; then 5 for the recipe gate; then 3 without approval; then 4 when the run's own readiness check says so. A run
+  that ends without a graded report ends as `run` ends it, with its error and exit code, and the verdict Can't tell.
+  After a run, 7 outranks every verdict, as in OUT-4, and the verdict is still printed. Then, the first that applies:
+  - **Can't tell (5), invalid.** The fresh run is invalid (GRD-5). It has no results and no score, so no row is read.
+  - **Regressed (6).** Any regressed row or chain in VFY-4: a new or worse finding, or a proof lost. Lost proof is a
+    regression, never neutral.
+  - **Can't tell (5).** Any can't-tell row; an identity that differs from the pin's in any field PIN-2 lists; a
+    statement or a skip the fresh manifest records that the pin doesn't, or the other way round; or VFY-7's unpinned
+    checks. This is where a run incomplete in a way the pin wasn't lands, when it lost no proof.
+  - **Better than pinned (0).** At least one better row, and none of the above. It names each by CMP-2's categories
+    and says that only a new pin keeps the gain: until then `verify` still expects the old result, and the finding's
+    return would read as pinned.
+  - **Holds (0).** Every row as pinned, no longer applies, or no longer found but not proven.
+
+  **6 outranks 5, as OUT-4 ranks them for a run, not as CMP-1 does.** CMP-1 puts 5 first because it compares two saved
+  reports and can't say which of them a changed setup belongs to. `verify` asks one fresh box a narrower question:
+  does it show a finding nobody accepted, or lack a proof the pin had? A valid run answers that whatever else changed.
+  A template that lost its launch wrapper changes the identity and adds findings at once, and that reads Regressed,
+  with the identity named beside it, never Can't tell. Every list is printed under every verdict, so nothing a higher
+  verdict outranks is hidden. A gate must reject every nonzero exit (CMP-1).
+
+  **Holds can cover an unknown.** Where the pin holds unknowns (PIN-5), Holds exits 0 on a run that `run` and
+  `compare` would end 5. It is the one place Sandprobe exits 0 over an unknown, and only over the unknowns the person
+  saw by name in the preview; the headline counts them every time (VFY-6). Holds means this fresh box, probed now,
+  shows nothing worse than the pin expects: not that it is secure, not that the next box will match, and still bounded
+  by GRD-4 and SBX-10.
+- **VFY-6 An accepted finding stays red everywhere.** The headline is the verdict, the fresh score and the counts, in
+  one of four fixed forms: `Holds at <s>/<of>: <a> findings accepted, <u> unknown, <n> not proven`; `Better than
+  pinned at <s>/<of> (pinned <ps>/<pof>): <a> findings accepted, <u> unknown, <n> not proven; pin again to keep it`;
+  `Regressed at <s>/<of> (pinned <ps>/<pof>): <r> new or worse, <l> proofs lost`; `Can't tell: <a fixed reason>`.
+  Under Regressed and Can't tell the same three counts follow on the next line, when the run is valid. The score is
+  SCR-2's, computed by Score's own code from the fresh report and never copied from the pin; an accepted finding's
+  category is red in it. The counts are the fresh run's own: red findings the pin accepts and the run still shows,
+  checks ending `unknown`, and find-only checks ending `not_found`. `verify` never prints pass, passed, green, clean,
+  safe or secure for the box as a whole, under any verdict. The report and page it writes know nothing of the pin, so
+  an accepted finding is as red in them as any other: no rendering marks one as waived, suppressed or passed.
+  - **An accepted finding that is no longer found** is never dropped silently. It is listed as CMP-2 would list it:
+    got better (`pass` or `absent`, backed by proof), no longer applies (`scoped_out`), or no longer found, but not
+    proven (`not_found`). Each says to pin again to drop the acceptance, since a pin that keeps it would still cover
+    the finding's return. `-o json` also lists them in a field of their own, `accepted_no_longer_found`: every
+    accepted finding, check or chain, that this run doesn't show as a finding, however it ended, checks in catalog
+    order and then chains. The other lists and `context_changes` say how each ended. A stale acceptance changes no
+    verdict and adds no exit code; a team that wants one to fail its job tests that the field is empty.
+  - **Each pinned unknown that is still unknown** is listed with the fixed line "still unknown: verify can't see a
+    change here".
+- **VFY-7 A catalog newer than the pin.** After an upgrade the installed catalog may hold checks the pin has no row
+  for. They run and are graded like any check, and the person never saw them in a preview. When every such check ends
+  `pass`, `absent`, `scoped_out` or `skipped`, the verdict stands, with a notice naming them and saying a new pin
+  would hold their proof. When any ends a finding, `unknown` or `not_found`, the verdict is Can't tell (5): "the pin
+  predates n checks; pin again", each listed with its result. A finding there was never accepted, and an unknown or a
+  not-proven result was never shown, so none can read as held; none is a regression either, since the pin said nothing
+  about it. A pin naming a check this catalog lacks was refused earlier (VFY-2). When the versions differ, the output
+  says which wrote the pin and which ran.
+- **VFY-8 What verify never does.** It never writes, renames or changes the pin, and has no flag that does: no update,
+  no accept, no re-pin. It reads only the pin and, for a recipe pin, the recipe. It makes no network connection beyond
+  the run's own, writes only what a run writes (the reports in `-out`, RCP-2's state file), and before approval
+  contacts nothing but, for a Docker pin, the local daemon, in `run docker`'s own read-only checks (VFY-3).
+  - **Agents.** An agent never edits a pin file by hand, and never changes what a pin binds (the recipe's hash, the
+    image, an expected result, an acceptance, a statement), to make `verify` hold. When `verify` doesn't hold, the
+    agent fixes the box, or tells its person, who alone decides to pin again (PIN-7). The guide, every block it
+    installs and the CLI's own help say so (AGT-3).
+- **VFY-9 Output.** Text opens with VFY-6's headline. Then, each only when it has an entry: the regressed checks, the
+  proofs lost, the can't-tell rows and context differences, what got better, what no longer applies, what is no longer
+  found but not proven, the accepted findings still present, each with its severity and the person's reason, the
+  unknowns, and VFY-7's notice. Then the pin's path, the report page's path and the cleanup, as UX-6 words it. Each
+  check is named by its category and question, and every line keeps UX-9: ASCII-safe under a C or POSIX locale, within
+  80 display columns. `-o json` prints one document, `sandprobe.verify/1`, and the OUT-1 report is the file in `-out`:
+  `verdict` (`holds`, `better`, `regressed` or `cant_tell`); `reasons`, fixed codes for a Can't tell; `valid` and
+  `complete`, the fresh run's; `pinned_score` and `fresh_score` (`{"score": n, "of": m}`, the fresh one `null` for an
+  invalid run); `regressed`, `lost_proof`, `now_unknown`, `better`, `no_longer_applicable`,
+  `no_longer_found_not_proven`, `accepted_still_present`, `accepted_no_longer_found`, `still_unknown`, `not_proven`
+  and `unpinned_checks`, each a list of IDs in catalog order, `[]` when none; `context_changes`; for a Docker pin,
+  `image {by, pinned_id, probed_id, same}`, where `by` is `digest` or `tag` and `same` is `null` when the pin holds no
+  ID (VFY-3); `pin` and `report`, the two paths; `cleanup`, with whether it was confirmed; and `limits`. An unapproved
+  call prints the plan instead (VFY-3). An error under `-o json` is AGT-5's: `pin.input` for a pin VFY-2 refuses,
+  `usage` for a statement that doesn't match, and `pin.recipe_changed` for the recipe gate. `limits` says what the pin
+  doesn't hold and `verify` therefore can't compare: the planned targets and discovery rules, each check's scope and
+  route, the proxy and the Kubernetes API the box names, the recipe's setting values and target, and how much a
+  finding covers. For a Docker pin it says which of VFY-3's statements held: probed by digest or by a mutable tag, and
+  whether the image is the one the pin was proven on, another, or unknown. A change in one of those shows only through
+  a check's result, and the last not even there: the pin holds no evidence (PIN-4), so a finding of the same severity
+  and evidence class reads as pinned though it now covers more, more readable files under one check say. The fresh
+  report shows what it covers, and `compare` against the pinned run's saved report reads the two side by side.
+
 ## Tests
 
 Every test here runs on public data. Tests that need a saved report use `demo/reports` and `test/reports`, which
@@ -3428,6 +3896,9 @@ provider runs stay with the operators' records (AGENTS rule 9), not in this repo
 | FIX-9 | `cmd/sandprobe/fix_docker_test.go` `TestFixLoopDocker`, with `SANDPROBE_FIXTURES=1` |
 | FIX-4 with PRV-17 | `cmd/sandprobe/fix_test.go` `TestFixDeclaredProvider` (a `sandprobe/5` report declaring `modal`, through `host.Plan` and the grader) and, with `SANDPROBE_FIXTURES=1`, `fix_docker_test.go` `TestFixDeclaredProviderDocker` (`run exec -provider modal -no-canary` into a local container): the report loads, reads out of five, lists Cloud access nowhere, takes its platform only from `-platform` (none, `docker` or `modal`), and never says `-provider`, `-platform` or "declared" |
 | FIX-10 | `examples/modal/bridge_test.py` against a fake `modal` module, run by `cmd/sandprobe/fix_test.go` `TestModalBridge`: ID substitution, tag mismatch, another app's sandbox, ambiguous and missing matches each refuse before any exec or terminate; a symlinked, non-regular, group-readable, duplicate-keyed or malformed state refuses; a state path in the way stops create before it creates; a failure after create, at the state write or by an interrupt, terminates the created sandbox through the object create returned, and an unconfirmed one exits 7 keeping the state; under `python -X dev`, a sentinel raised by the fake SDK at a stdout or stderr read, a stdin write, drain or write_eof, a wait, a list in `sh` or `rm`, a terminate, a poll, a thread of its own, a warning, a log line or an unraisable `__del__` never reaches stdout or stderr, and each exits with its documented code; and, each run 50 times as `python -X dev` subprocesses with no "Fatal Python error", traceback or sentinel: the remote ending while stdin stays open (its code passes through, 0 and 3), stdin closed at start, stdin `/dev/null`, a large file still being pumped when the remote ends, a stdin write failing mid-pump (1), wait returning at once while a later `write_eof` fails (1), a late drain failure (1), a late write failure while the remote runs (1), the remote ending before more input arrives (its code, 3, the input never sent), stdout failing after the wait (1), a pump that never ends (1, after its bound), and the barrier: a write, or an end-of-input, in flight when the remote ends with 3, which then returns: no drain may begin after it, and 3 passes through (200 runs) |
+| PIN-1 to PIN-9 | Not built; the code change adds them. `internal/pin/pin_test.go`: `TestPinBytesAreStable` (the same report and arguments give the same bytes on any day, in the fixed key order; another Sandprobe version changes them), `TestPinNeverHolds` (built from `demo/reports` with a hostile box name, paths, reasons, evidence and target planted in the report: none reaches the pin, which holds only catalog and CHN IDs, fixed vocabulary, exact-form numbers and digests, and the person's own strings; the setuid scan as a count and a digest, never a path), `TestPinStringsAreScanned` (one refusal per FBK-4 pattern in a reason, an image reference, an option word, `-as`, `-scratch` and a recipe path, home paths included, each naming the place and never the text; the recipe hash and an `@sha256:` digest pass in their exact form and a bare 64-digit hex anywhere else doesn't), `TestPinImageID` (the ID comes from the report's record and never from a daemon call, which `pin` never makes; a report without it gives a pin with no `image_id` and the "pinned by tag only" line; any form but `sha256:` and 64 hex is refused), `TestPinDockerEnvValues` (`-e N=v`, `--env N=v`, `--env=N=v`, `--env-file`, split across words or joined, each refused by position; `-e NAME` passes; `--rm` refused). `cmd/sandprobe/pin_test.go`: `TestPinPreviewThenConfirm` (a preview writes nothing and exits 3 with a code; the same call with the code writes exactly the previewed bytes; any changed report, recipe, argument or reason, a pin that appeared, changed or went, or another version is `pin.changed`, writes nothing and never prints the new code; `-y` is a usage error; `-o json` doesn't change the code), `TestPinUnpinnable` (a `run exec`, a shipped recipe's, a native adapter's, a `-no-canary`, a `self` and an invalid report, a report with `created_by_sandprobe` false, a recipe whose SHA-256 isn't the report's, an image that isn't the report's box name, a numeric `-as` that isn't its uid, each refusal for a `run kubernetes` or native report naming the person's own recipe as the way forward and no shipped one, both or neither of `-recipe` and `-docker`: each refused with its reason and what to do instead), `TestPinAcceptByName` (every red finding and every chain named once with a reason, or the refusal lists what is missing with nothing written; a wildcard, `all`, a category, a pass, an Info finding, an unknown, an unformed chain, a duplicate and a blank reason are refused, and a non-ID is never echoed; accepting a chain's checks doesn't accept the chain), `TestPinIncomplete` (unknowns land in `unknown`, never in `not_proven` or `accepted`, the preview opens with the INCOMPLETE line, and the write exits 0), `TestRepinLooser` (a new acceptance, a higher severity, a lost proof and a new unknown each read LOOSER, by the same function `verify` uses; a changed identity or statement reads NOT COMPARABLE; a pure improvement reads not looser; an unreadable old file shows nothing from it; the code binds the old file), `TestPinWrite` (whole-file write then rename, never through a symlink or over a non-regular file, the old pin intact on failure), `TestPinGolden` (text at 80 columns under a UTF-8 and a C locale, and `-o json`, against `cmd/sandprobe/testdata/pin/`). `cmd/sandprobe/pin_pty_unix_test.go` `TestPinPrompt` (asked only under FBK-5's gate, only `yes` writes, never asked in the background, in CI or with `-o json`). `cmd/sandprobe/main_test.go` `TestHelpSaysOnlyThePersonPins` (the help carries AGT-3's three: an agent never confirms a pin, never gives an `-accept` reason of its own, never edits a pin to make `verify` hold) |
+| VFY-1 to VFY-9 | Not built; the code change adds them. `internal/pin/verify_test.go`: `TestVerifyTableIsTotal` (for every catalog check, every pinned result legal for its kind against every fresh result legal for its kind, with each severity and evidence-class step, lands in exactly one of VFY-4's rows, and the rows are the ones the table names), `TestVerifyVerdictPrecedence` (invalid is Can't tell with no row read; a regressed row with a changed identity is Regressed with the identity listed; a can't-tell row with a better row is Can't tell; better alone is Better; a `pass` to `unknown` is Regressed and a finding to `unknown` is Can't tell; an unconfirmed cleanup is 7 over each), `TestVerifyChains` (a new chain, a higher one and a potential one confirmed are regressed), `TestVerifyNewerCatalog` (a check the pin lacks ending `pass`, `absent`, `scoped_out` or `skipped` is a notice; a finding, `unknown` or `not_found` is Can't tell; a pin naming a check the catalog lacks is refused), `TestVerifyHoldsNeverFromScore` (a higher severity inside an already-red category, and a `pass` turned `not_found` in a green one, keep the score and are Regressed), `TestPinRebuilt` (a pin whose `score`, `accepted`, `unknown` or `not_proven` disagrees with its `checks`, an unaccepted red finding, an edited skip kind, a declared provider the table lacks, a result illegal for its kind, an unknown field, a duplicate key, an optional field present but empty or null, setting names that aren't the recipe header's, a symlink, a FIFO, an oversize file and a credential in a reason are each refused with nothing echoed; an edit that loosens an expectation consistently reads, and changes only what is expected). `cmd/sandprobe/verify_test.go`, with a recipe in a temporary directory whose functions record each call: `TestVerifyRecipeGate` (a changed or missing recipe exits 5 with no `sh` started, `sp_ready` included, and both hashes shown), `TestVerifyNoRecipeCodeBeforeApproval` (without `-y` no function runs and the plan carries the path, the full hash and no target; with `-y`, `sp_ready` runs first), `TestVerifyStatementsTypedAgain` (`-provider`, `-provider-endpoints` and `-allow-local-proxy` missing, extra or different are usage errors that never echo the value; a pin edited to declare a provider can't change the score without the flag), `TestVerifyTakesNoOverride` (an image, a recipe, `-as`, `-scratch`, `-no-canary`, `-min`, `-confirm` and anything after `--` are usage errors, and the fix says only a new pin changes them), `TestVerifyNeverWritesThePin` (bytes and mtime unchanged under every verdict), `TestVerifyImageSaysHowItProbes` (a fake docker: a digest reference reads "by digest"; a tag naming the pinned ID, a tag moved to another ID and a pin with no ID each read their fixed line in the plan, the result, `image` in the JSON and `limits`; none changes the verdict, and no pull is ever run), `TestVerifyStaleAcceptance` (an accepted check ending `pass`, `not_found`, `scoped_out` or `unknown`, and an accepted chain no longer formed, are each in `accepted_no_longer_found` and in the list that says how; the verdict and exit code are the ones without it), `TestVerifyOneEngine` (the runner is called with the pinned arguments and its report files carry nothing from the pin), `TestVerifyHeadline` (the four fixed forms; the score is Score's of the fresh report with an accepted finding's category red; none of pass, passed, green, clean, safe or secure describes the box), `TestVerifyGolden` (text at 80 columns under both locales and `sandprobe.verify/1` against `cmd/sandprobe/testdata/verify/`). With `SANDPROBE_FIXTURES=1` and local Docker only, `cmd/sandprobe/verify_docker_test.go` `TestPinVerifyDocker`: pin the weak image of FIX-9 with each finding accepted, then `verify` Holds; the same image with an added setuid-root file, with `--user` dropped, and with a proof-carrying option removed are Regressed or Can't tell, never Holds; with one accepted finding fixed it is Better and the next pin drops the acceptance; every container, canary and network is gone by ID each time |
+| PRV-17 on `run -recipe` | Not built; lands with RCP-4's `-recipe <file>`. `cmd/sandprobe/recipe_provider_test.go`: `TestRecipeProviderParse` (accepted on `run -recipe` and `plan -recipe` for every table key; still refused on a shipped recipe, `run docker` and native adapters; the recipe's `provider:` header never declares and never changes a kind), `TestRecipeProviderOnlyChangesKinds` (with and without `-provider` the same checks are selected and the same destinations planned; the entry's checks carry `provider_terms` with the entry's reason and the rest `opt_in`; `-provider-endpoints` naming an excluded check is refused), `TestRecipeProviderPlanAndCard` (the declared section and unverified sentence in the plan, the summary, `scorecard` and the page; out of five; `-min 6` refused), `TestRecipeProviderSaved` (ANL-1 refuses the name on any other kind of report, a name the table lacks and kinds that differ; `compare` reads a declared recipe report against an undeclared one as a changed setup; `fix` never takes its platform from it) |
 | FBK-1 to FBK-7 | `cmd/sandprobe/feedback_test.go`, with `PATH` pinned in every test to a directory holding a fake `gh` that records the full arguments, standard input and `GH_HOST`/`GH_REPO` of every call, or holding none, so no test can reach GitHub: `TestFeedbackKinds` (each kind's prefix, label, form and main field, through gh and through the link, once confirmed), `TestFeedbackRefusesCredentials` (one refusal per FBK-4 pattern, home paths included, each naming the place and the pattern and never printing the matched text, in text and in `-o json`, with nothing sent and gh never run; ordinary text and placeholders pass, one key a line; a list after a key on its line is refused by design), `TestFeedbackPassesOwnOutput` (every check's `explain`, and `scorecard`, `profile` and `assess` of every saved report in text and JSON, and `compare`, pass the scan; `secrets: x`, `SECRETS=`, longer names and an altered own line don't), `TestFeedbackRefusesShortCredentials` (the security reviews of #65: short values in every header, Bearer, Basic, URL, YAML, INI, JSON, environment, flag and prefixed-token form; every Slack prefix; a URL with an empty user; `DB_PASS` and `MYSQL_PWD`; a YAML or JSON value on the next line, a second continuation line, a continuation after a placeholder, a block scalar, an explicit key, a folded `Authorization` header, and credentials found only by the YAML and JSON walks of a fenced block or the whole body, an escaped key among them; round 3's shell-joined values (`"<redacted>"x` in field, header, flag, Bearer and continuation form, and a placeholder followed by more words), round 5's double-quote backslashes (`"tr\ue"` in Bearer, header, field and flag form, and `"\$TOKEN"`, whose raw form isn't a placeholder), each leaking without the fix; round 5's backticks after an escaped one (`` note \` token: <redacted>`x ``, its Bearer form, a double-escaped `\\`, and a quoted value before the backtick), each leaking without the fix, and a backtick inside quotes; round 4's unmatched backticks and closing punctuation (`Bearer <redacted>` then a stray backtick, and `'true)'` in Bearer, flag, header and field form), and its comma and semicolon lists (`TOKEN=<redacted>,x`, `export TOKEN=<redacted>,x`, `TOKEN=<redacted>;x`, `Authorization: Token <redacted>,x`, `--token=<redacted>,x`, a YAML scalar or flow sequence with a comma, and a continuation line), each but the flow sequence leaking without the fix, escaped and HTML-referenced names in prose, a YAML alias key inside a fence nested in a longer one, the same in a seventeenth YAML document, and a repeated, escaped JSON key with its colon on another line; through gh and through the link, in text and in `-o json`, with and without a `-confirm` code: each is refused, the value appears in no output, gh is never run, and no link or file is made), `TestFeedbackWalkLimits` (JSON nested past 10,000 behind a split colon that YAML can't read, and fences nested past 16, refuse and name the limit; `walkJSON` alone reads exactly 10,000 containers, with or without a value inside, and refuses one more, an unclosed run, and Codex's round 4 body, but not prose or a short cut-off document; a repeated JSON key can't hide the first one's value), `TestFeedbackPromptGatePTY` (over a real PTY: a foreground terminal asks and takes only `yes`; a background process group, a PTY that isn't the session's controlling terminal, `CI`, `TERM=dumb` and `SANDPROBE_NO_KEYS` never ask and never block), `TestFeedbackReportSummary` (a saved report made hostile in the test, with credentials, home paths, variable names and a box name in every free-text field and as its provider, still passes ANL-1; none of them reaches the preview, gh's arguments, its standard input or the link; an edited report gets ANL-1's fixed error), `TestFeedbackTransport` (the exact arguments of the graphql query and of `issue create`, unchanged with `GH_HOST` and `GH_REPO` set; the body on standard input; the label only for an account that can triage; gh absent or not signed in gives the link once confirmed; gh failing or printing no issue URL exits 5 with the link), `TestFeedbackLink` (percent-encoding, the 8,000-character limit, and the body written to a private file when it is longer), `TestFeedbackJSON` (one document with FBK-7's fields; `public` and, through gh, `account`; a login not in GitHub's form means no gh), `TestFeedbackConsent` (a preview prints the code, exits 3, makes no link and never runs `issue create`; the matching code files exactly the previewed title, labels and body; an edited body, another account, gh signed in after a link preview, or a wrong code is refused with `feedback.changed` and nothing filed or linked; `-o json` doesn't change the code; `-y` is a usage error; the terminal prompt accepts only `yes`, and no `/dev/tty` means no filing), `TestFeedbackUsage` (a bad kind, title, body, `-provider` or `-confirm`) |
 | REL-1 to REL-3 | `.github/workflows/release.yml` on every pull request: REL-1 twice on separate runners, compared file by file, publishing nothing, and `.github/release-version_test.sh` (REL-2's version grammar: `x.y.z` publishes as a full release, `x.y.z-rc.N` as a pre-release never marked Latest, and everything else is refused, a leading `v`, another suffix, a missing part, a second line and an empty version among them); on a release, the version check before anything is published, then the attestation |
 | QCK-1/QCK-2 | Linux quick metadata/no-follow FIFO/symlink tests, status/error/name bounds tests, static amd64/arm64 packaging checksums |
